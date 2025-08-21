@@ -1,97 +1,155 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const { Boom } = require('@hapi/boom');
 
-console.log('🚀 Starting WhatsApp Job Bot...');
+console.log('🚀 Starting WhatsApp Job Bot (Baileys)...');
 
-const client = new Client({
-    authStrategy: new LocalAuth({
-        clientId: "job-bot"
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process', // Important for Railway's memory limits
-            '--disable-gpu'
-        ]
-    }
-});
+// Your group name from Railway environment variable
+const TARGET_GROUP_NAME = process.env.GROUP_NAME || 'MEME COINS';
 
-// CHANGE THIS TO YOUR ACTUAL GROUP NAME
-const TARGET_GROUP_NAME = process.env.GROUP_NAME || 'Jobs Group'; 
-
-// QR Code for first setup
-client.on('qr', (qr) => {
-    console.log('📱 SCAN THIS QR CODE WITH YOUR WHATSAPP:');
-    console.log('====================================');
-    qrcode.generate(qr, { small: true });
-    console.log('====================================');
-    console.log('Open WhatsApp → Settings → Linked Devices → Link a Device');
-});
-
-// Bot ready
-client.on('ready', () => {
-    console.log('✅ WhatsApp Job Bot is READY!');
-    console.log(`🎯 Monitoring group: "${TARGET_GROUP_NAME}"`);
-    console.log('Bot will automatically like all messages in this group');
-});
-
-// Main message handler
-client.on('message', async (message) => {
+async function startBot() {
     try {
-        const chat = await message.getChat();
+        // Use multi-file auth state for session persistence
+        const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
         
-        // Only process group messages
-        if (!chat.isGroup) return;
+        const sock = makeWASocket({
+            auth: state,
+            printQRInTerminal: true,
+            logger: {
+                level: 'silent' // Reduce log noise
+            }
+        });
+
+        // Save credentials when updated
+        sock.ev.on('creds.update', saveCreds);
+
+        // Connection updates
+        sock.ev.on('connection.update', (update) => {
+            const { connection, lastDisconnect } = update;
+            
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect?.error instanceof Boom) ? 
+                    lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut : false;
+                
+                console.log('⚠️ Connection closed:', lastDisconnect?.error?.message);
+                
+                if (shouldReconnect) {
+                    console.log('🔄 Reconnecting in 5 seconds...');
+                    setTimeout(() => startBot(), 5000);
+                }
+            } else if (connection === 'open') {
+                console.log('✅ WhatsApp connection opened successfully');
+                console.log(`🎯 Monitoring group: "${TARGET_GROUP_NAME}"`);
+                console.log('Bot will auto-react to all messages in this group');
+            }
+        });
+
+        // Message handler - this is where the magic happens!
+        sock.ev.on('messages.upsert', async (messageUpdate) => {
+            try {
+                const messages = messageUpdate.messages;
+                
+                for (const message of messages) {
+                    // Skip if no message content or if it's our own message
+                    if (!message.message || message.key.fromMe) continue;
+                    
+                    await processMessage(sock, message);
+                }
+            } catch (error) {
+                console.error('❌ Message processing error:', error.message);
+            }
+        });
+
+        console.log('⏳ Initializing WhatsApp connection...');
+
+    } catch (error) {
+        console.error('❌ Bot initialization error:', error);
+        console.log('🔄 Retrying in 10 seconds...');
+        setTimeout(() => startBot(), 10000);
+    }
+}
+
+async function processMessage(sock, message) {
+    try {
+        const messageKey = message.key;
+        const remoteJid = messageKey.remoteJid;
         
-        // Check if it's our target group
-        if (chat.name === TARGET_GROUP_NAME) {
-            console.log(`📨 NEW JOB POST: "${message.body.substring(0, 50)}..."`);
-            console.log(`👤 From: ${message.author ? message.author.split('@')[0] : 'Admin'}`);
-            
-            // Auto-react with thumbs up
-            await message.react('👍');
-            console.log('✅ AUTO-LIKED successfully!');
-            
-            // Log with timestamp
-            const timestamp = new Date().toLocaleString();
-            console.log(`[${timestamp}] ✅ Reacted to job posting`);
+        // Check if message is from a group
+        if (!remoteJid || !remoteJid.includes('@g.us')) {
+            return; // Not a group message, ignore
         }
+
+        // Get group info to check the name
+        const groupMetadata = await sock.groupMetadata(remoteJid);
+        const groupName = groupMetadata.subject;
+
+        // Check if this is our target group
+        if (groupName !== TARGET_GROUP_NAME) {
+            return; // Not our target group, ignore
+        }
+
+        // Extract message text for logging
+        let messageText = '';
+        const messageContent = message.message;
         
+        if (messageContent.conversation) {
+            messageText = messageContent.conversation;
+        } else if (messageContent.extendedTextMessage) {
+            messageText = messageContent.extendedTextMessage.text;
+        } else if (messageContent.imageMessage?.caption) {
+            messageText = messageContent.imageMessage.caption;
+        } else {
+            messageText = '[Media message]';
+        }
+
+        console.log(`📨 NEW MESSAGE in ${groupName}: "${messageText.substring(0, 50)}..."`);
+        console.log(`👤 From: ${messageKey.participant?.split('@')[0] || 'Admin'}`);
+
+        // Auto-react with thumbs up
+        await sock.sendMessage(remoteJid, {
+            react: {
+                text: '👍',
+                key: messageKey
+            }
+        });
+
+        console.log('✅ AUTO-LIKED successfully!');
+        
+        // Log with timestamp
+        const timestamp = new Date().toLocaleString();
+        console.log(`[${timestamp}] ✅ Reacted to message in ${groupName}`);
+
     } catch (error) {
         console.error('❌ Error processing message:', error.message);
+        
+        // If reaction fails, try sending a message instead
+        try {
+            await sock.sendMessage(message.key.remoteJid, {
+                text: 'Interested! 👍'
+            });
+            console.log('✅ Sent interest message as fallback');
+        } catch (fallbackError) {
+            console.error('❌ Fallback message also failed:', fallbackError.message);
+        }
     }
-});
-
-// Connection issues handler
-client.on('disconnected', (reason) => {
-    console.log('⚠️ WhatsApp disconnected:', reason);
-    console.log('🔄 Bot will attempt to reconnect...');
-});
-
-client.on('auth_failure', (msg) => {
-    console.error('❌ Authentication failed:', msg);
-    console.log('📱 You may need to scan the QR code again');
-});
+}
 
 // Start the bot
-client.initialize();
+startBot();
 
-// Keep alive for Railway (restarts every 12 hours to manage resources)
+// Restart every 6 hours to manage memory on Railway
 setInterval(() => {
-    console.log('🔄 Restarting bot to manage memory (Railway optimization)');
+    console.log('🔄 Restarting bot for memory management...');
     process.exit(0); // Railway will automatically restart
-}, 12 * 60 * 60 * 1000); // 12 hours
+}, 6 * 60 * 60 * 1000);
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('🛑 Bot shutting down...');
-    client.destroy();
+// Graceful shutdown handlers
+process.on('SIGINT', async () => {
+    console.log('🛑 Received SIGINT. Shutting down gracefully...');
+    process.exit(0);
 });
 
-console.log('⏳ Initializing WhatsApp connection...');
+process.on('SIGTERM', async () => {
+    console.log('🛑 Received SIGTERM. Shutting down gracefully...');
+    process.exit(0);
+});
