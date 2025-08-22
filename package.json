@@ -1,18 +1,21 @@
 {
-  "name": "whatsapp-job-bot",
+  "name": "whatsapp-bot-basic",
   "version": "1.0.0",
-  "description": "Auto-react to job postings in WhatsApp groups",
+  "description": "Basic WhatsApp bot using Baileys",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.4.0",
-    "pino": "^8.11.0",
+    "@whiskeysockets/baileys": "^6.7.8",
     "qrcode-terminal": "^0.12.0",
-    "fs": "^0.0.1-security"
+    "pino": "^8.19.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   },
   "engines": {
-    "node": "18.x"
+    "node": ">=18.0.0"
   }
 }
