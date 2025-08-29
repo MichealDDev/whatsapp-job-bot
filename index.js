@@ -3,6 +3,20 @@ const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fs = require('fs').promises;
 const path = require('path');
+// Helper: Get full WhatsApp ID
+const jid = (number) => `${number}@s.whatsapp.net`;
+
+// Get user role
+const getRole = (senderJid) => {
+  const user = senderJid.split('@')[0];
+  const owner = require('./data/config/admins.json').owner;
+  if (user === owner) return 'owner';
+
+  const admins = require('./data/config/admins.json').admins;
+  if (admins.includes(user)) return 'admin';
+
+  return 'user';
+};
 
 // Create logger
 const logger = P({ level: 'silent' });
@@ -161,13 +175,62 @@ async function startBot() {
                     }
                 }
                 
-                // 2. Reply to .hi command only
-                else if (text && text.trim() === '.hi') {
-                    console.log('🤖 Responding to .hi command');
-                    await sendMessageWithDelay(sender, { 
-                        text: '👋 Hello! I\'m a WhatsApp bot. I\'m currently in development mode.' 
-                    }, 1000, 2000);
-                }
+               // Handle .menu command
+else if (text.trim() === '.menu') {
+  const role = getRole(sender);
+  const isGroup = msg.key.remoteJid.includes('@g.us');
+  let menu = '';
+
+  if (role === 'owner') {
+    menu = `🔐 █▓▒░ OWNER CONTROL ░▒▓█
+║ Access: ROOT
+║
+╠══ 🎯 STOCK MONITOR
+║ 🔹 .stock on/off
+║ 🔹 .alerts
+║
+╠══ 🎮 GAMES
+║ 🔹 .start [game]
+║ 🔹 .stop
+║
+║ 🔹 .killswitch on
+║
+║ "Command accepted."
+╚════════════════════════════`;
+  } else if (role === 'admin') {
+    menu = `👮 █▓▒░ ADMIN PANEL ░▒▓█
+║ Role: Admin
+║
+╠══ 🎮 GAMES
+║ 🔹 .start rps
+║ 🔹 .stop
+║
+║ "Authority confirmed."
+╚════════════════════════════`;
+  } else {
+    menu = `🎮 █▓▒░ WA TERMINAL ░▒▓█
+║ Team Operations Hub
+║
+╠══ PUBLIC ACCESS
+║
+║ 🎮 .games
+║ 📊 .rank
+║ 📞 .help
+║
+║ "Ready for engagement."
+╚════════════════════════════`;
+  }
+
+  if (isGroup) {
+    // Send "sent to DM" in group
+    await sock.sendMessage(sender, { text: '📬 Sent menu to your DM' });
+    // Send full menu to user's DM
+    await sock.sendMessage(sender, { text: menu });
+  } else {
+    // If already in DM, just send menu
+    await sock.sendMessage(sender, { text: menu });
+  }
+}
             }
         } catch (error) {
             console.error('❌ Error processing message:', error);
