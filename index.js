@@ -9,12 +9,13 @@ const jid = (number) => `${number}@s.whatsapp.net`;
 // Get user role
 const getRole = (senderJid) => {
   const user = senderJid.split('@')[0];
-  const owner = require('./data/config/admins.json').owner;
-  if (user === owner) return 'owner';
-
-  const admins = require('./data/config/admins.json').admins;
-  if (admins.includes(user)) return 'admin';
-
+  const ownerNumber = require('./data/config/admins.json').owner; // "234808886878"
+  
+  if (user === ownerNumber) return 'owner';
+  
+  const adminNumbers = require('./data/config/admins.json').admins; // ["2349057938488"]
+  if (adminNumbers.includes(user)) return 'admin';
+  
   return 'user';
 };
 
