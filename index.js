@@ -1,8 +1,4 @@
-case 'hi':
-                await sendMessageWithDelay(sock, jid, { 
-                    text: '👋 Hello! I\'m an advanced WhatsApp bot.\n\nType .menu to explore my features!' 
-                }, 1000, 2000);
-                return;const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fs = require('fs').promises;
