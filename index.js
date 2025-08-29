@@ -3,76 +3,513 @@ const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fs = require('fs').promises;
 const path = require('path');
-// Helper: Get full WhatsApp ID
-const jid = (number) => `${number}@s.whatsapp.net`;
-
-// Get user role
-const getRole = (senderJid) => {
-  const user = senderJid.split('@')[0];
-  const ownerNumber = require('./data/config/admins.json').owner; // "234808886878"
-  
-  if (user === ownerNumber) return 'owner';
-  
-  const adminNumbers = require('./data/config/admins.json').admins; // ["2349057938488"]
-  if (adminNumbers.includes(user)) return 'admin';
-  
-  return 'user';
-};
 
 // Create logger
 const logger = P({ level: 'silent' });
 
-// Reaction counter storage
-const COUNTER_FILE = path.join(__dirname, 'reaction_counters.json');
-let reactionCounters = {};
+// Configuration
+const CONFIG = {
+    MENU_TIMEOUT: 5 * 60 * 1000, // 5 minutes
+    BACKUP_INTERVAL: 30 * 60 * 1000, // 30 minutes
+    DATA_DIR: path.join(__dirname, 'data'),
+    OWNER: '2348088866878@s.whatsapp.net',
+    ADMINS: ['2348088866878@s.whatsapp.net', '2349057938488@s.whatsapp.net']
+};
 
-// Load existing counters from file
-async function loadCounters() {
+// Data storage objects
+let botData = {
+    admins: [...CONFIG.ADMINS],
+    features: {
+        stockCount: true,
+        creativeHub: true,
+        gamesArena: true,
+        utilityCenter: true,
+        analyticsPanel: true,
+        funZone: true,
+        masterSwitch: true
+    },
+    reactionCounters: {},
+    userSessions: {},
+    gameData: {
+        leaderboards: { global: {}, groups: {} },
+        activeGames: {}
+    },
+    analytics: {
+        commandUsage: {},
+        userActivity: {},
+        groupStats: {}
+    }
+};
+
+// Initialize data directory and files
+async function initializeDataSystem() {
     try {
-        const data = await fs.readFile(COUNTER_FILE, 'utf8');
-        reactionCounters = JSON.parse(data);
-        console.log('📊 Loaded existing reaction counters');
+        // Create data directory
+        await fs.mkdir(CONFIG.DATA_DIR, { recursive: true });
+        
+        // Load existing data or create defaults
+        await loadAllData();
+        
+        // Set up auto-backup
+        setInterval(backupData, CONFIG.BACKUP_INTERVAL);
+        
+        console.log('📊 Data system initialized successfully');
     } catch (error) {
-        console.log('📊 No existing counters found, starting fresh');
-        reactionCounters = {};
+        console.error('❌ Failed to initialize data system:', error);
     }
 }
 
-// Save counters to file
-async function saveCounters() {
-    try {
-        await fs.writeFile(COUNTER_FILE, JSON.stringify(reactionCounters, null, 2));
-    } catch (error) {
-        console.error('❌ Error saving counters:', error);
+// Load all data from files
+async function loadAllData() {
+    const files = ['admins.json', 'features.json', 'reactionCounters.json', 
+                   'userSessions.json', 'gameData.json', 'analytics.json'];
+    
+    for (const file of files) {
+        try {
+            const filePath = path.join(CONFIG.DATA_DIR, file);
+            const data = await fs.readFile(filePath, 'utf8');
+            const key = file.replace('.json', '');
+            const parsedData = JSON.parse(data);
+            
+            if (key === 'admins') botData.admins = parsedData;
+            else if (key === 'features') botData.features = { ...botData.features, ...parsedData };
+            else botData[key] = parsedData;
+            
+            console.log(`✅ Loaded ${file}`);
+        } catch (error) {
+            console.log(`📁 ${file} not found, using defaults`);
+        }
     }
 }
 
-// Generate unique key for message
-function getMessageKey(msg) {
-    return `${msg.key.remoteJid}_${msg.key.id}`;
+// Save data to files
+async function saveData(type) {
+    try {
+        const filePath = path.join(CONFIG.DATA_DIR, `${type}.json`);
+        await fs.writeFile(filePath, JSON.stringify(botData[type], null, 2));
+    } catch (error) {
+        console.error(`❌ Error saving ${type}:`, error);
+    }
 }
 
-// Check if message contains "new stock count" (case insensitive)
+// Auto-backup system
+async function backupData() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupDir = path.join(CONFIG.DATA_DIR, 'backups', timestamp);
+    
+    try {
+        await fs.mkdir(backupDir, { recursive: true });
+        
+        for (const [key, data] of Object.entries(botData)) {
+            if (typeof data === 'object') {
+                const backupPath = path.join(backupDir, `${key}.json`);
+                await fs.writeFile(backupPath, JSON.stringify(data, null, 2));
+            }
+        }
+        console.log('💾 Data backup completed');
+    } catch (error) {
+        console.error('❌ Backup failed:', error);
+    }
+}
+
+// Authentication system
+function isOwner(jid) {
+    return jid === CONFIG.OWNER;
+}
+
+function isAdmin(jid) {
+    return botData.admins.includes(jid);
+}
+
+function hasFeatureAccess(feature) {
+    return botData.features.masterSwitch && botData.features[feature];
+}
+
+// Session management
+function getUserSession(jid) {
+    if (!botData.userSessions[jid]) {
+        botData.userSessions[jid] = {
+            currentMenu: 'main',
+            lastActivity: Date.now(),
+            breadcrumb: []
+        };
+    }
+    return botData.userSessions[jid];
+}
+
+function updateUserSession(jid, menu, action = 'navigate') {
+    const session = getUserSession(jid);
+    
+    if (action === 'navigate') {
+        if (menu !== session.currentMenu) {
+            session.breadcrumb.push(session.currentMenu);
+        }
+        session.currentMenu = menu;
+    } else if (action === 'back') {
+        session.currentMenu = session.breadcrumb.pop() || 'main';
+    }
+    
+    session.lastActivity = Date.now();
+    saveData('userSessions');
+}
+
+function checkSessionTimeout(jid) {
+    const session = getUserSession(jid);
+    const timeDiff = Date.now() - session.lastActivity;
+    
+    if (timeDiff > CONFIG.MENU_TIMEOUT) {
+        session.currentMenu = 'main';
+        session.breadcrumb = [];
+        return true;
+    }
+    return false;
+}
+
+// UI Rendering System
+function renderMenu(menuName, userJid) {
+    const isAdminUser = isAdmin(userJid);
+    const isOwnerUser = isOwner(userJid);
+    
+    const menus = {
+        main: `🎮 ═══════════════════ 🤖
+║     MAIN MENU        ║
+║                      ║
+║  🎨 [1] Creative Hub ║
+║  🎮 [2] Games Arena  ║
+║  🛠️  [3] Utility Center║
+║  📊 [4] Analytics    ║
+║  🎭 [5] Fun Zone     ║
+${isAdminUser ? '║  👑 [6] Admin Panel  ║' : ''}
+║  ❓ [7] Help Center  ║
+║                      ║
+║  .help ? .admin 👑   ║
+╚══════════════════════╝`,
+
+        creative: `🎨 ═══════════════════ 🤖
+║   CREATIVE HUB       ║
+║                      ║
+║  ✨ [1] ASCII Art    ║
+║  🖼️  [2] Image → ASCII║
+║  🤖 [3] Fake ChatGPT ║
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        games: `🎮 ═══════════════════ 🤖
+║    GAMES ARENA       ║
+║                      ║
+║  ✂️  [1] Rock Paper   ║
+║  🔢 [2] Number Guess ║
+║  🧠 [3] Trivia Bot   ║
+║  🔗 [4] Word Chain   ║
+║  🎯 [5] Emoji Riddle ║
+║  🏆 [6] Leaderboards ║
+${isAdminUser ? '║  ⚙️  [7] Game Admin   ║' : ''}
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        utility: `🛠️ ═══════════════════ 🤖
+║   UTILITY CENTER     ║
+║                      ║
+║  🌐 [1] Translator   ║
+║  🎤 [2] Voice → Text ║
+║  🔗 [3] Link Preview ║
+║  ⏰ [4] Scheduler    ║
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        analytics: `📊 ═══════════════════ 🤖
+║  ANALYTICS PANEL     ║
+║                      ║
+║  📈 [1] Group Stats  ║
+║  👥 [2] User Activity║
+║  ☁️  [3] Word Clouds  ║
+║  📱 [4] My Stats     ║
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        fun: `🎭 ═══════════════════ 🤖
+║     FUN ZONE         ║
+║                      ║
+║  🤣 [1] Dad Jokes    ║
+║  🧠 [2] Random Facts ║
+║  🔮 [3] Fortune Tell ║
+║  😊 [4] Mood Detect  ║
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        admin: `👑 ═══════════════════ 🤖
+║    ADMIN PANEL       ║
+║                      ║
+║  👥 [1] User Mgmt    ║
+║  ⚙️  [2] Features     ║
+║  🎮 [3] Game Mgmt    ║
+${isOwnerUser ? '║  📊 [4] Stock Toggle ║' : ''}
+║  🔴 [5] Kill Switch  ║
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        help: `❓ ═══════════════════ 🤖
+║    HELP CENTER       ║
+║                      ║
+║  📖 [1] Commands     ║
+║  🎮 [2] Game Guide   ║
+║  🛠️  [3] Features     ║
+║  🆘 [4] Troubleshoot ║
+║                      ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`
+    };
+
+    return menus[menuName] || menus.main;
+}
+
+// Message processing utilities
+function getRandomDelay(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function sendMessageWithDelay(sock, jid, content, minDelay = 1000, maxDelay = 3000) {
+    const delay = getRandomDelay(minDelay, maxDelay);
+    
+    setTimeout(async () => {
+        try {
+            await sock.sendMessage(jid, content);
+        } catch (error) {
+            console.error('❌ Error sending message:', error);
+        }
+    }, delay);
+}
+
+// Stock count system (preserved functionality)
 function isStockCountMessage(text) {
     if (!text) return false;
     return text.toLowerCase().includes('new stock count');
 }
 
-async function startBot() {
-    // Load existing reaction counters
-    await loadCounters();
+function getMessageKey(msg) {
+    return `${msg.key.remoteJid}_${msg.key.id}`;
+}
+
+async function handleStockCountReaction(sock, msg) {
+    if (!hasFeatureAccess('stockCount')) return;
     
-    // Use multi-file auth state to save session
+    try {
+        await sock.sendMessage(msg.key.remoteJid, {
+            react: { text: '👍', key: msg.key }
+        });
+        
+        const msgKey = getMessageKey(msg);
+        if (!botData.reactionCounters[msgKey]) {
+            botData.reactionCounters[msgKey] = {
+                count: 0,
+                hasReplied: false,
+                messageText: msg.message.conversation?.substring(0, 50) + '...' || 'Stock count message'
+            };
+            await saveData('reactionCounters');
+        }
+    } catch (error) {
+        console.error('❌ Error handling stock count reaction:', error);
+    }
+}
+
+// Command processor
+async function processCommand(sock, msg, command, args) {
+    const jid = msg.key.remoteJid;
+    const userJid = msg.key.participant || jid;
+    
+    try {
+        // Check session timeout
+        if (checkSessionTimeout(userJid)) {
+            await sendMessageWithDelay(sock, jid, { 
+                text: '⏰ Session timed out. Returning to main menu.' 
+            }, 500, 1000);
+        }
+        
+        const session = getUserSession(userJid);
+        
+        // Universal commands
+        switch (command) {
+            case 'menu':
+            case 'home':
+                updateUserSession(userJid, 'main');
+                await sendMessageWithDelay(sock, jid, { text: renderMenu('main', userJid) });
+                return;
+                
+            case 'back':
+                updateUserSession(userJid, '', 'back');
+                const currentMenu = getUserSession(userJid).currentMenu;
+                await sendMessageWithDelay(sock, jid, { text: renderMenu(currentMenu, userJid) });
+                return;
+                
+            case 'help':
+                await sendMessageWithDelay(sock, jid, { 
+                    text: `❓ HELP - Available Commands:
+                    
+🔹 .menu / .home → Main menu
+🔹 .back → Previous menu  
+🔹 .help → This help message
+🔹 .admin → Admin panel (admins only)
+
+📱 Navigate using numbers [1], [2], etc.
+⏰ Menus auto-reset after 5 minutes
+🎮 Have fun exploring!` 
+                });
+                return;
+                
+            case 'admin':
+                if (!isAdmin(userJid)) return; // Silent ignore
+                updateUserSession(userJid, 'admin');
+                await sendMessageWithDelay(sock, jid, { text: renderMenu('admin', userJid) });
+                return;
+                
+            case 'hi':
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '👋 Hello! I\'m an advanced WhatsApp bot.\n\nType .menu to explore my features!' 
+                }, 1000, 2000);
+                return;
+        }
+        
+        // Number-based menu navigation
+        if (/^[1-7]$/.test(command)) {
+            const choice = parseInt(command);
+            await handleMenuNavigation(sock, jid, userJid, session.currentMenu, choice);
+            return;
+        }
+        
+        // If command not recognized, show current menu
+        await sendMessageWithDelay(sock, jid, { text: renderMenu(session.currentMenu, userJid) });
+        
+    } catch (error) {
+        console.error('❌ Command processing error:', error);
+        await sendMessageWithDelay(sock, jid, { 
+            text: '⚠️ Something went wrong. Please try again or type .menu' 
+        });
+    }
+}
+
+// Menu navigation handler
+async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
+    const isAdminUser = isAdmin(userJid);
+    
+    try {
+        switch (currentMenu) {
+            case 'main':
+                const mainMenus = ['creative', 'games', 'utility', 'analytics', 'fun'];
+                if (choice <= 5 && hasFeatureAccess(mainMenus[choice - 1])) {
+                    updateUserSession(userJid, mainMenus[choice - 1]);
+                    await sendMessageWithDelay(sock, jid, { text: renderMenu(mainMenus[choice - 1], userJid) });
+                } else if (choice === 6 && isAdminUser) {
+                    updateUserSession(userJid, 'admin');
+                    await sendMessageWithDelay(sock, jid, { text: renderMenu('admin', userJid) });
+                } else if (choice === 7) {
+                    updateUserSession(userJid, 'help');
+                    await sendMessageWithDelay(sock, jid, { text: renderMenu('help', userJid) });
+                }
+                break;
+                
+            case 'creative':
+                if (choice === 1) {
+                    await sendMessageWithDelay(sock, jid, { 
+                        text: '🎨 ASCII Art Generator\n\nSend any text and I\'ll convert it to ASCII art!\nExample: Send "HELLO" to see it in ASCII style.' 
+                    });
+                } else if (choice === 2) {
+                    await sendMessageWithDelay(sock, jid, { 
+                        text: '🖼️ Image → ASCII Converter\n\nSend me any image and I\'ll convert it to ASCII art!\nNote: Works best with high contrast images.' 
+                    });
+                } else if (choice === 3) {
+                    await sendMessageWithDelay(sock, jid, { 
+                        text: '🤖 Fake ChatGPT Mode Activated!\n\nI\'ll respond to your messages in AI assistant style. Ask me anything!' 
+                    });
+                }
+                break;
+                
+            case 'admin':
+                if (!isAdminUser) return;
+                await handleAdminCommands(sock, jid, userJid, choice);
+                break;
+                
+            default:
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '🚧 Feature coming soon!\n\nThis section is under development.' 
+                });
+        }
+    } catch (error) {
+        console.error('❌ Navigation error:', error);
+        await sendMessageWithDelay(sock, jid, { text: '⚠️ Navigation error. Type .menu to restart.' });
+    }
+}
+
+// Admin command handler
+async function handleAdminCommands(sock, jid, userJid, choice) {
+    const isOwnerUser = isOwner(userJid);
+    
+    try {
+        switch (choice) {
+            case 1: // User Management
+                const userCount = Object.keys(botData.userSessions).length;
+                await sendMessageWithDelay(sock, jid, { 
+                    text: `👥 USER MANAGEMENT\n\n📊 Active Users: ${userCount}\n👑 Admins: ${botData.admins.length}\n\n🔧 Management options coming soon!` 
+                });
+                break;
+                
+            case 2: // Feature Toggles
+                const features = Object.entries(botData.features)
+                    .map(([key, value]) => `${value ? '✅' : '❌'} ${key}`)
+                    .join('\n');
+                await sendMessageWithDelay(sock, jid, { 
+                    text: `⚙️ FEATURE TOGGLES\n\n${features}\n\n🔧 Toggle controls coming soon!` 
+                });
+                break;
+                
+            case 3: // Game Management
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '🎮 GAME MANAGEMENT\n\n🏆 Leaderboards\n🎯 Active Games\n⚙️ Settings\n\n🔧 Full game controls coming soon!' 
+                });
+                break;
+                
+            case 4: // Stock Toggle (Owner only)
+                if (!isOwnerUser) return;
+                botData.features.stockCount = !botData.features.stockCount;
+                await saveData('features');
+                await sendMessageWithDelay(sock, jid, { 
+                    text: `📊 STOCK COUNT: ${botData.features.stockCount ? '✅ ENABLED' : '❌ DISABLED'}` 
+                });
+                break;
+                
+            case 5: // Kill Switch
+                botData.features.masterSwitch = !botData.features.masterSwitch;
+                await saveData('features');
+                await sendMessageWithDelay(sock, jid, { 
+                    text: `🔴 MASTER SWITCH: ${botData.features.masterSwitch ? '✅ ONLINE' : '❌ OFFLINE'}` 
+                });
+                break;
+        }
+    } catch (error) {
+        console.error('❌ Admin command error:', error);
+        await sendMessageWithDelay(sock, jid, { text: '⚠️ Admin command failed. Please try again.' });
+    }
+}
+
+async function startBot() {
+    // Initialize data system
+    await initializeDataSystem();
+    
     const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
     
     const sock = makeWASocket({
         auth: state,
         logger,
-        printQRInTerminal: false, // We'll handle QR code display manually
-        browser: ["WhatsApp Bot", "Chrome", "1.0.0"], // Identify as a bot
+        printQRInTerminal: false,
+        browser: ["WhatsApp Advanced Bot", "Chrome", "1.0.0"],
     });
 
-    // Handle QR code display
+    // Connection handling
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         
@@ -83,224 +520,92 @@ async function startBot() {
         
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('❌ Connection closed due to ', lastDisconnect?.error, ', reconnecting:', shouldReconnect);
+            console.log('❌ Connection closed, reconnecting:', shouldReconnect);
             
             if (shouldReconnect) {
-                setTimeout(startBot, 3000); // Restart after 3 seconds
+                setTimeout(startBot, 3000);
             }
         } else if (connection === 'open') {
-            console.log('✅ WhatsApp bot connected successfully!');
-            console.log('🤖 Bot is now ready to receive messages');
+            console.log('✅ Bot connected successfully!');
+            console.log('🎮 Advanced menu system ready!');
         }
     });
 
-    // Save credentials when updated
     sock.ev.on('creds.update', saveCreds);
 
-    // Function to generate random delay
-    const getRandomDelay = (min, max) => {
-        return Math.floor(Math.random() * (max - min + 1)) + min;
-    };
-
-    // Function to send message with random delay
-    const sendMessageWithDelay = async (jid, content, minDelay = 1000, maxDelay = 3000) => {
-        const delay = getRandomDelay(minDelay, maxDelay);
-        console.log(`⏳ Waiting ${delay}ms before sending message...`);
-        
-        setTimeout(async () => {
-            try {
-                await sock.sendMessage(jid, content);
-                console.log(`✅ Message sent to ${jid}`);
-            } catch (error) {
-                console.error(`❌ Error sending message:`, error);
-            }
-        }, delay);
-    };
-
-    // Function to react to message instantly (safe for stock count messages)
-    const reactToMessage = async (msg, emoji) => {
-        try {
-            await sock.sendMessage(msg.key.remoteJid, {
-                react: {
-                    text: emoji,
-                    key: msg.key
-                }
-            });
-            console.log(`👍 Instantly reacted to stock count message with ${emoji}`);
-        } catch (error) {
-            console.error(`❌ Error reacting to message:`, error);
-        }
-    };
-
-    // Handle incoming messages
+    // Message handling
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
             
-            // Skip if no message or if it's from us or status broadcast
             if (!msg || msg.key.fromMe || msg.key.remoteJid === 'status@broadcast') {
                 return;
             }
 
-            // Skip if message object doesn't exist
             if (!msg.message) {
-                console.log('⚠️ Received message without message content (possibly a reaction or system message)');
+                console.log('⚠️ Received message without content');
                 return;
             }
 
             const messageType = Object.keys(msg.message)[0];
-            console.log(`📩 Received message type: ${messageType}`);
             
-            // Only process text messages
             if (messageType === 'conversation' || messageType === 'extendedTextMessage') {
                 const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-                const sender = msg.key.remoteJid;
+                const userJid = msg.key.participant || msg.key.remoteJid;
                 
-                console.log(`📨 Message from ${sender}: ${text}`);
+                // Log command usage
+                botData.analytics.commandUsage[userJid] = (botData.analytics.commandUsage[userJid] || 0) + 1;
                 
-                // 1. Auto-react to "New stock count" messages (case insensitive)
+                // Handle stock count messages
                 if (isStockCountMessage(text)) {
-                    console.log('🎯 Detected "New stock count" message - reacting with 👍');
-                    await reactToMessage(msg, '👍');
-                    
-                    // Initialize counter for this message
-                    const msgKey = getMessageKey(msg);
-                    if (!reactionCounters[msgKey]) {
-                        reactionCounters[msgKey] = {
-                            count: 0,
-                            hasReplied: false,
-                            messageText: text.substring(0, 50) + '...' // Store snippet for logging
-                        };
-                        await saveCounters();
-                        console.log(`📊 Initialized counter for message: ${msgKey}`);
-                    }
+                    await handleStockCountReaction(sock, msg);
                 }
                 
-               // Handle .menu command
-else if (text.trim() === '.menu') {
-  const role = getRole(sender);
-  const isGroup = msg.key.remoteJid.includes('@g.us');
-  let menu = '';
-
-  if (role === 'owner') {
-    menu = `🔐 █▓▒░ OWNER CONTROL ░▒▓█
-║ Access: ROOT
-║
-╠══ 🎯 STOCK MONITOR
-║ 🔹 .stock on/off
-║ 🔹 .alerts
-║
-╠══ 🎮 GAMES
-║ 🔹 .start [game]
-║ 🔹 .stop
-║
-║ 🔹 .killswitch on
-║
-║ "Command accepted."
-╚════════════════════════════`;
-  } else if (role === 'admin') {
-    menu = `👮 █▓▒░ ADMIN PANEL ░▒▓█
-║ Role: Admin
-║
-╠══ 🎮 GAMES
-║ 🔹 .start rps
-║ 🔹 .stop
-║
-║ "Authority confirmed."
-╚════════════════════════════`;
-  } else {
-    menu = `🎮 █▓▒░ WA TERMINAL ░▒▓█
-║ Team Operations Hub
-║
-╠══ PUBLIC ACCESS
-║
-║ 🎮 .games
-║ 📊 .rank
-║ 📞 .help
-║
-║ "Ready for engagement."
-╚════════════════════════════`;
-  }
-
-  if (isGroup) {
-    // Send "sent to DM" in group
-    await sock.sendMessage(sender, { text: '📬 Sent menu to your DM' });
-    // Send full menu to user's DM
-    await sock.sendMessage(sender, { text: menu });
-  } else {
-    // If already in DM, just send menu
-    await sock.sendMessage(sender, { text: menu });
-  }
-}
+                // Process bot commands
+                if (text && text.startsWith('.')) {
+                    const parts = text.slice(1).split(' ');
+                    const command = parts[0].toLowerCase();
+                    const args = parts.slice(1);
+                    
+                    await processCommand(sock, msg, command, args);
+                }
             }
         } catch (error) {
-            console.error('❌ Error processing message:', error);
-            // Don't crash the bot, just log the error and continue
+            console.error('❌ Message processing error:', error);
         }
     });
 
-    // Handle reactions to track stock count reactions
+    // Reaction handling (stock count system)
     sock.ev.on('messages.reaction', async (reactions) => {
         try {
             for (const reaction of reactions) {
                 const msgKey = `${reaction.key.remoteJid}_${reaction.key.id}`;
                 
-                // Only process if this is a tracked stock count message
-                if (reactionCounters[msgKey]) {
-                    console.log(`👍 Reaction ${reaction.reaction.text || 'removed'} on stock count message by ${reaction.key.participant || 'user'}`);
+                if (botData.reactionCounters[msgKey]) {
+                    if (reaction.reaction.text) {
+                        botData.reactionCounters[msgKey].count += 1;
+                    } else {
+                        botData.reactionCounters[msgKey].count = Math.max(0, botData.reactionCounters[msgKey].count - 1);
+                    }
                     
-                    // Count current reactions by getting the message
-                    try {
-                        // Get all reactions for this message
-                        let totalReactions = 0;
+                    await saveData('reactionCounters');
+                    
+                    if (botData.reactionCounters[msgKey].count === 10 && !botData.reactionCounters[msgKey].hasReplied) {
+                        await sendMessageWithDelay(
+                            sock,
+                            reaction.key.remoteJid,
+                            { text: 'Number of stock counters reached: 10' },
+                            2000,
+                            4000
+                        );
                         
-                        // In Baileys, we need to track reactions manually
-                        // Since we can't easily get total count, we'll increment/decrement based on the reaction event
-                        if (reaction.reaction.text) {
-                            // Reaction added
-                            reactionCounters[msgKey].count += 1;
-                            console.log(`📈 Reaction added. New count: ${reactionCounters[msgKey].count}`);
-                        } else {
-                            // Reaction removed (when reaction.text is empty/null)
-                            reactionCounters[msgKey].count = Math.max(0, reactionCounters[msgKey].count - 1);
-                            console.log(`📉 Reaction removed. New count: ${reactionCounters[msgKey].count}`);
-                        }
-                        
-                        await saveCounters();
-                        
-                        // Check if we've reached exactly 10 reactions and haven't replied yet
-                        if (reactionCounters[msgKey].count === 10 && !reactionCounters[msgKey].hasReplied) {
-                            console.log('🎉 Stock count message reached 10 reactions! Sending reply...');
-                            
-                            // Reply to the original message
-                            await sendMessageWithDelay(
-                                reaction.key.remoteJid,
-                                {
-                                    text: 'Number of stock counters reached: 10',
-                                    contextInfo: {
-                                        stanzaId: reaction.key.id,
-                                        participant: reaction.key.participant || undefined,
-                                        quotedMessage: {
-                                            conversation: reactionCounters[msgKey].messageText
-                                        }
-                                    }
-                                },
-                                2000,
-                                4000
-                            );
-                            
-                            // Mark as replied
-                            reactionCounters[msgKey].hasReplied = true;
-                            await saveCounters();
-                        }
-                        
-                    } catch (msgError) {
-                        console.error('❌ Error processing reaction count:', msgError);
+                        botData.reactionCounters[msgKey].hasReplied = true;
+                        await saveData('reactionCounters');
                     }
                 }
             }
         } catch (error) {
-            console.error('❌ Error processing reactions:', error);
+            console.error('❌ Reaction processing error:', error);
         }
     });
 
@@ -308,18 +613,22 @@ else if (text.trim() === '.menu') {
 }
 
 // Start the bot
-console.log('🚀 Starting WhatsApp bot...');
+console.log('🚀 Starting Advanced WhatsApp Bot...');
+console.log('🎮 Loading menu system...');
 startBot().catch(err => {
-    console.error('❌ Error starting bot:', err);
+    console.error('❌ Bot startup error:', error);
+    process.exit(1);
 });
 
-// Handle process termination gracefully
-process.on('SIGINT', () => {
-    console.log('\n👋 Bot shutting down gracefully...');
+// Graceful shutdown
+process.on('SIGINT', async () => {
+    console.log('\n💾 Saving data before shutdown...');
+    await backupData();
+    console.log('👋 Bot shutting down gracefully...');
     process.exit(0);
 });
 
-process.on('SIGTERM', () => {
-    console.log('\n👋 Bot shutting down gracefully...');
+process.on('SIGTERM', async () => {
+    await backupData();
     process.exit(0);
 });
