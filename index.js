@@ -512,4 +512,22 @@ async function startBot() {
     return sock;
 }
 
-console.log('🚀 Starting Complete Advanced Wh
+console.log('🚀 Starting Complete Advanced WhatsApp Bot...');
+console.log('🎮 All features loaded and ready!');
+startBot().catch(err => {
+    console.error('❌ Bot startup error:', err);
+    process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+    console.log('\n💾 Saving data before shutdown...');
+    await backupData();
+    console.log('👋 Bot shutting down gracefully...');
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    await backupData();
+    process.exit(0);
+});
