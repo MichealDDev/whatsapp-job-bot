@@ -1,4 +1,8 @@
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+case 'hi':
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '👋 Hello! I\'m an advanced WhatsApp bot.\n\nType .menu to explore my features!' 
+                }, 1000, 2000);
+                return;const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fs = require('fs').promises;
@@ -12,13 +16,14 @@ const CONFIG = {
     MENU_TIMEOUT: 5 * 60 * 1000, // 5 minutes
     BACKUP_INTERVAL: 30 * 60 * 1000, // 30 minutes
     DATA_DIR: path.join(__dirname, 'data'),
-    OWNER: '2348088866878@s.whatsapp.net',
-    ADMINS: ['2348088866878@s.whatsapp.net', '2349057938488@s.whatsapp.net']
+    OWNER_NUMBER: '2348088866878', // Just the number without @s.whatsapp.net
+    ADMIN_NUMBERS: ['2348088866878', '2349057938488'], // Just numbers
+    CONTROL_GROUP: 'bot control room' // Case insensitive group name matching
 };
 
 // Data storage objects
 let botData = {
-    admins: [...CONFIG.ADMINS],
+    admins: [...CONFIG.ADMIN_NUMBERS.map(num => num + '@s.whatsapp.net')],
     features: {
         stockCount: true,
         creativeHub: true,
@@ -112,13 +117,27 @@ async function backupData() {
     }
 }
 
-// Authentication system
+// Authentication system - IMPROVED
+function extractPhoneNumber(jid) {
+    // Extract just the phone number from various JID formats
+    // Handles: 2348088866878@s.whatsapp.net, 2348088866878-1234567890@g.us (groups), etc.
+    if (!jid) return null;
+    return jid.split('@')[0].split('-')[0];
+}
+
 function isOwner(jid) {
-    return jid === CONFIG.OWNER;
+    const phoneNumber = extractPhoneNumber(jid);
+    return phoneNumber === CONFIG.OWNER_NUMBER;
 }
 
 function isAdmin(jid) {
-    return botData.admins.includes(jid);
+    const phoneNumber = extractPhoneNumber(jid);
+    return CONFIG.ADMIN_NUMBERS.includes(phoneNumber);
+}
+
+function isControlGroup(groupName) {
+    if (!groupName) return false;
+    return groupName.toLowerCase().includes(CONFIG.CONTROL_GROUP.toLowerCase());
 }
 
 function hasFeatureAccess(feature) {
@@ -323,6 +342,13 @@ async function processCommand(sock, msg, command, args) {
     const jid = msg.key.remoteJid;
     const userJid = msg.key.participant || jid;
     
+    // Debug logging for admin recognition
+    const phoneNumber = extractPhoneNumber(userJid);
+    const isOwnerUser = isOwner(userJid);
+    const isAdminUser = isAdmin(userJid);
+    
+    console.log(`📞 User: ${phoneNumber}, Owner: ${isOwnerUser}, Admin: ${isAdminUser}`);
+    
     try {
         // Check session timeout
         if (checkSessionTimeout(userJid)) {
@@ -363,15 +389,25 @@ async function processCommand(sock, msg, command, args) {
                 return;
                 
             case 'admin':
-                if (!isAdmin(userJid)) return; // Silent ignore
+                if (!isAdmin(userJid)) {
+                    console.log(`❌ Admin access denied for ${extractPhoneNumber(userJid)}`);
+                    return; // Silent ignore
+                }
+                console.log(`✅ Admin access granted for ${extractPhoneNumber(userJid)}`);
                 updateUserSession(userJid, 'admin');
                 await sendMessageWithDelay(sock, jid, { text: renderMenu('admin', userJid) });
                 return;
                 
-            case 'hi':
-                await sendMessageWithDelay(sock, jid, { 
-                    text: '👋 Hello! I\'m an advanced WhatsApp bot.\n\nType .menu to explore my features!' 
-                }, 1000, 2000);
+            case 'debug':
+                // Debug command to check admin status
+                if (!isAdmin(userJid)) return;
+                const debugInfo = `🔍 DEBUG INFO:
+📞 Your number: ${extractPhoneNumber(userJid)}
+👑 Owner status: ${isOwner(userJid) ? '✅' : '❌'}
+🛡️ Admin status: ${isAdmin(userJid) ? '✅' : '❌'}
+💬 Chat type: ${jid.includes('@g.us') ? 'Group' : 'DM'}
+🆔 Your JID: ${userJid}`;
+                await sendMessageWithDelay(sock, jid, { text: debugInfo });
                 return;
         }
         
