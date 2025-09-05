@@ -4,6 +4,8 @@ const P = require('pino');
 const fs = require('fs').promises;
 const path = require('path');
 const ytdl = require('ytdl-core'); // Added for YouTube functionality
+const { exec } = require('child_process');
+const fetch = require('node-fetch');
 
 const logger = P({ level: 'silent' });
 
@@ -15,6 +17,8 @@ const CONFIG = {
     OWNER_ALT_ID: '211532071870561',
     ADMIN_NUMBERS: ['2348088866878', '2349057938488']
 };
+
+const startTime = Date.now();
 
 let botData = {
     features: { stockCount: true, creativeHub: true, gamesArena: true, utilityCenter: true, analyticsPanel: true, funZone: true, masterSwitch: true, groupCommands: true, youtubeCommands: true },
@@ -101,7 +105,7 @@ function hasFeatureAccess(feature) {
 
 function getUserSession(jid) {
     if (!botData.userSessions[jid]) {
-        botData.userSessions[jid] = { currentMenu: 'main', lastActivity: Date.now(), breadcrumb: [], notes: [] };
+        botData.userSessions[jid] = { currentMenu: 'main', lastActivity: Date.now(), breadcrumb: [], notes: [], aiMode: false };
     }
     return botData.userSessions[jid];
 }
@@ -124,6 +128,7 @@ function checkSessionTimeout(jid) {
     if (timeDiff > CONFIG.MENU_TIMEOUT) {
         session.currentMenu = 'main';
         session.breadcrumb = [];
+        session.aiMode = false;
         return true;
     }
     return false;
@@ -134,86 +139,21 @@ function renderMenu(menuName, userJid) {
     const isOwnerUser = isOwner(userJid);
     
     const menus = {
-        main: `🎮 ═══════════════════ 🤖
-║     MAIN MENU        ║
-║  🎨 [1] Creative Hub ║
-║  🎮 [2] Games Arena  ║
-║  🛠️  [3] Utility Center║
-║  📊 [4] Analytics    ║
-║  🎭 [5] Fun Zone     ║
-║  👥 [6] Group Tools  ║
-║  📺 [7] YouTube Tools║
-${isAdminUser ? '║  👑 [8] Admin Panel  ║' : ''}
-║  ❓ [9] Help Center  ║
-║  .help ? .admin 👑   ║
-╚══════════════════════╝`,
+        main: `🎮 ═══════════════════ 🤖\n║     MAIN MENU        ║\n║  🎨 [1] Creative Hub ║\n║  🎮 [2] Games Arena  ║\n║  🛠️  [3] Utility Center║\n║  📊 [4] Analytics    ║\n║  🎭 [5] Fun Zone     ║\n║  👥 [6] Group Tools  ║\n║  📺 [7] YouTube Tools║\n${isAdminUser ? '║  👑 [8] Admin Panel  ║' : ''}\n║  ❓ [9] Help Center  ║\n║  .help ? .admin 👑   ║\n╚══════════════════════╝`,
         
-        creative: `🎨 ═══════════════════ 🤖
-║   CREATIVE HUB       ║
-║  ✨ [1] ASCII Art    ║
-║  🖼️  [2] Image→ASCII ║
-║  🤖 [3] Fake ChatGPT ║
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`,
+        creative: `🎨 ═══════════════════ 🤖\n║   CREATIVE HUB       ║\n║  ✨ [1] ASCII Art    ║\n║  🖼️  [2] Image→ASCII ║\n║  🤖 [3] AI Chat      ║\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`,
 
-        games: `🎮 ═══════════════════ 🤖
-║    GAMES ARENA       ║
-║  ✂️  [1] Rock Paper   ║
-║  🔢 [2] Number Guess ║
-║  🧠 [3] Trivia Bot   ║
-║  🎯 [4] Emoji Riddle ║
-║  🔤 [5] Word Scramble║
-║  🏆 [6] Leaderboards ║
-${isAdminUser ? '║  ⚙️  [7] Game Admin   ║' : ''}
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`,
+        games: `🎮 ═══════════════════ 🤖\n║    GAMES ARENA       ║\n║  ✂️  [1] Rock Paper   ║\n║  🔢 [2] Number Guess ║\n║  🧠 [3] Trivia Bot   ║\n║  🎯 [4] Emoji Riddle ║\n║  🔤 [5] Word Scramble║\n║  🏆 [6] Leaderboards ║\n${isAdminUser ? '║  ⚙️  [7] Game Admin   ║' : ''}\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`,
 
-        utility: `🛠️ ═══════════════════ 🤖
-║   UTILITY CENTER     ║
-║  📅 [1] Reminders    ║
-║  📝 [2] Notes        ║
-║  🔢 [3] Calculator   ║
-║  🌐 [4] Translator   ║
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`,
+        utility: `🛠️ ═══════════════════ 🤖\n║   UTILITY CENTER     ║\n║  📅 [1] Reminders    ║\n║  📝 [2] Notes        ║\n║  🔢 [3] Calculator   ║\n║  🌐 [4] Translator   ║\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`,
 
-        group: `👥 ═══════════════════ 🤖
-║    GROUP TOOLS       ║
-║  📢 [1] Announce     ║
-║  🏷️  [2] Tag All     ║
-║  🔒 [3] Group Lock   ║
-║  🔓 [4] Group Unlock ║
-║  👋 [5] Kick User    ║
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`,
+        group: `👥 ═══════════════════ 🤖\n║    GROUP TOOLS       ║\n║  📢 [1] Announce     ║\n║  🏷️  [2] Tag All     ║\n║  🔒 [3] Group Lock   ║\n║  🔓 [4] Group Unlock ║\n║  👋 [5] Kick User    ║\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`,
 
-        youtube: `📺 ═══════════════════ 🤖
-║   YOUTUBE TOOLS      ║
-║  🔍 [1] Search Video ║
-║  🎥 [2] Video Info   ║
-║  🎵 [3] Audio Info   ║
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`,
+        youtube: `📺 ═══════════════════ 🤖\n║   YOUTUBE TOOLS      ║\n║  🔍 [1] Search Video ║\n║  🎥 [2] Video Info   ║\n║  🎵 [3] Audio Info   ║\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`,
 
-        admin: `👑 ═══════════════════ 🤖
-║    ADMIN PANEL       ║
-║  👥 [1] User Mgmt    ║
-║  ⚙️  [2] Features     ║
-║  🎮 [3] Game Mgmt    ║
-${isOwnerUser ? '║  📊 [4] Stock Toggle ║' : ''}
-${isOwnerUser ? '║  🔧 [5] Owner Tools  ║' : ''}
-║  🔴 [6] Kill Switch  ║
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`,
+        admin: `👑 ═══════════════════ 🤖\n║    ADMIN PANEL       ║\n║  👥 [1] User Mgmt    ║\n║  ⚙️  [2] Features     ║\n║  🎮 [3] Game Mgmt    ║\n${isOwnerUser ? '║  📊 [4] Stock Toggle ║' : ''}\n${isOwnerUser ? '║  🔧 [5] Owner Tools  ║' : ''}\n║  🔴 [6] Kill Switch  ║\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`,
 
-        owner: `🔧 ═══════════════════ 🤖
-║    OWNER TOOLS       ║
-║  📢 [1] Broadcast    ║
-║  🔄 [2] Restart Bot  ║
-║  🛡️ [3] Add Admin   ║
-║  🗑️  [4] Clear Data  ║
-║  .back ← .menu 🏠    ║
-╚══════════════════════╝`
+        owner: `🔧 ═══════════════════ 🤖\n║    OWNER TOOLS       ║\n║  📢 [1] Broadcast    ║\n║  🔄 [2] Restart Bot  ║\n║  🛡️ [3] Add Admin   ║\n║  🗑️  [4] Clear Data  ║\n║  .back ← .menu 🏠    ║\n╚══════════════════════╝`
     };
     
     return menus[menuName] || menus.main;
@@ -275,22 +215,30 @@ function calculate(expression) {
     }
 }
 
-function translateText(text, targetLang = 'en') {
-    // Placeholder for translation API integration
-    return `🚧 Translation to ${targetLang} coming soon!`;
+async function translateText(text, targetLang = 'en') {
+    try {
+        const response = await fetch('https://libretranslate.de/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ q: text, source: 'auto', target: targetLang })
+        });
+        const data = await response.json();
+        return data.translatedText || '❌ Translation failed';
+    } catch (error) {
+        console.error('❌ Translation error:', error);
+        return '❌ Translation service unavailable';
+    }
 }
 
 // YouTube Functions
 async function searchYouTube(query) {
-    try {
-        // Note: ytdl-core doesn't have a direct search function, so this is a placeholder
-        // You may need to use an external search service or implement yt-dlp CLI with search
-        return await sendMessageWithDelay(sock, jid, { text: '🔍 YouTube search via yt-dlp is complex. Please use .ytvideo with a specific URL for now.' });
-        // For actual search, you could integrate with a search engine or yt-dlp CLI
-    } catch (error) {
-        console.error('❌ YouTube search error:', error);
-        return [];
-    }
+    return new Promise((resolve, reject) => {
+        exec(`yt-dlp "ytsearch5:${query}" --dump-json`, (err, stdout) => {
+            if (err) return reject(err);
+            const results = stdout.split('\n').filter(line => line).map(JSON.parse);
+            resolve(results.map(r => ({ title: r.title, url: r.webpage_url })));
+        });
+    });
 }
 
 async function getVideoInfo(videoUrl) {
@@ -323,6 +271,54 @@ async function getAudioInfo(videoUrl) {
     } catch (error) {
         console.error('❌ YouTube audio info error:', error);
         return null;
+    }
+}
+
+// Additional Commands Functions
+async function getRandomJoke() {
+    try {
+        const response = await fetch('https://v2.jokeapi.dev/joke/Any?safe-mode');
+        const data = await response.json();
+        if (data.type === 'single') {
+            return data.joke;
+        } else {
+            return `${data.setup}\n\n${data.delivery}`;
+        }
+    } catch (error) {
+        console.error('❌ Joke API error:', error);
+        return '❌ Could not fetch a joke';
+    }
+}
+
+async function getRandomFact() {
+    try {
+        const response = await fetch('https://uselessfacts.jsph.pl/random.json?language=en');
+        const data = await response.json();
+        return data.text;
+    } catch (error) {
+        console.error('❌ Fact API error:', error);
+        return '❌ Could not fetch a fact';
+    }
+}
+
+async function getRandomQuote() {
+    try {
+        const response = await fetch('https://api.quotable.io/random');
+        const data = await response.json();
+        return `*${data.content}*\n— _${data.author}_`;
+    } catch (error) {
+        console.error('❌ Quote API error:', error);
+        return '❌ Could not fetch a quote';
+    }
+}
+
+async function getAIResponse(query) {
+    try {
+        const response = await fetch(`https://ab-blackboxai.abrahamdw882.workers.dev/?q=${encodeURIComponent(query)}`);
+        return await response.text();
+    } catch (error) {
+        console.error('❌ AI API error:', error);
+        return '❌ AI service unavailable';
     }
 }
 
@@ -507,15 +503,36 @@ async function processCommand(sock, msg, command, args) {
                 return;
             case 'translate':
                 if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🌐 Please provide text to translate' });
-                const translation = translateText(args.join(' '));
-                await sendMessageWithDelay(sock, jid, { text: translation });
+                let targetLang = 'en';
+                let translateArgs = args;
+                if (args.length > 1 && args[0].length === 2) {
+                    targetLang = args[0];
+                    translateArgs = args.slice(1);
+                }
+                const translation = await translateText(translateArgs.join(' '), targetLang);
+                await sendMessageWithDelay(sock, jid, { text: `🌐 Translation: *${translation}*` });
+                return;
+            // Fun Commands
+            case 'joke':
+                const joke = await getRandomJoke();
+                await sendMessageWithDelay(sock, jid, { text: `😂 *Joke Time!*\n\n${joke}\n\nWant more? Type .joke again! 🎉` });
+                return;
+            case 'fact':
+                const fact = await getRandomFact();
+                await sendMessageWithDelay(sock, jid, { text: `🤓 *Fun Fact!*\n\n${fact}\n\nAmazing, right? Try .fact for another! 🌟` });
+                return;
+            case 'quote':
+                const quote = await getRandomQuote();
+                await sendMessageWithDelay(sock, jid, { text: `💬 *Inspirational Quote*\n\n${quote}\n\nFeeling motivated? Get another with .quote! ✨` });
                 return;
             // YouTube Commands
             case 'ytsearch':
                 if (!hasFeatureAccess('youtubeCommands')) return;
                 if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🔍 Please provide YouTube search query' });
-                // Placeholder: ytdl-core doesn't support search directly
-                await sendMessageWithDelay(sock, jid, { text: '🔍 YouTube search is not supported directly. Please use .ytvideo with a specific URL.' });
+                const searchResults = await searchYouTube(args.join(' '));
+                if (!searchResults.length) return await sendMessageWithDelay(sock, jid, { text: '❌ No results found' });
+                const formattedResults = searchResults.map((r, i) => `${i+1}. *${r.title}*\n${r.url}`).join('\n\n');
+                await sendMessageWithDelay(sock, jid, { text: `🔍 *YouTube Search Results:*\n\n${formattedResults}` });
                 return;
             case 'ytvideo':
                 if (!hasFeatureAccess('youtubeCommands')) return;
@@ -523,7 +540,7 @@ async function processCommand(sock, msg, command, args) {
                 if (!ytdl.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { text: '❌ Invalid YouTube URL' });
                 const videoInfo = await getVideoInfo(args[0]);
                 if (!videoInfo) return await sendMessageWithDelay(sock, jid, { text: '❌ Video not found' });
-                await sendMessageWithDelay(sock, jid, { text: `🎥 ${videoInfo.title}\n👀 Views: ${videoInfo.views}\n⏱️ Duration: ${Math.floor(videoInfo.duration / 60)}m ${videoInfo.duration % 60}s\n🔗 ${videoInfo.url}` });
+                await sendMessageWithDelay(sock, jid, { text: `🎥 *${videoInfo.title}*\n👀 Views: ${videoInfo.views}\n⏱️ Duration: ${Math.floor(videoInfo.duration / 60)}m ${videoInfo.duration % 60}s\n🔗 ${videoInfo.url}` });
                 return;
             case 'ytaudio':
                 if (!hasFeatureAccess('youtubeCommands')) return;
@@ -531,7 +548,12 @@ async function processCommand(sock, msg, command, args) {
                 if (!ytdl.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { text: '❌ Invalid YouTube URL' });
                 const audioInfo = await getAudioInfo(args[0]);
                 if (!audioInfo) return await sendMessageWithDelay(sock, jid, { text: '❌ Audio not found' });
-                await sendMessageWithDelay(sock, jid, { text: `🎵 ${audioInfo.title}\n⏱️ Duration: ${Math.floor(audioInfo.duration / 60)}m ${audioInfo.duration % 60}s\n🎧 Bitrate: ${audioInfo.bitrate}kbps\n🔗 ${audioInfo.url}` });
+                await sendMessageWithDelay(sock, jid, { text: `🎵 *${audioInfo.title}*\n⏱️ Duration: ${Math.floor(audioInfo.duration / 60)}m ${audioInfo.duration % 60}s\n🎧 Bitrate: ${audioInfo.bitrate}kbps\n🔗 ${audioInfo.url}` });
+                return;
+            case 'ping':
+                const latency = Date.now() - msg.messageTimestamp * 1000;
+                const uptimeMinutes = ((Date.now() - startTime) / 1000 / 60).toFixed(2);
+                await sendMessageWithDelay(sock, jid, { text: `🏓 *Pong!*\n\n⚡ *Latency:* ${latency}ms\n🕒 *Uptime:* ${uptimeMinutes} minutes\n🚀 *Status:* Online and ready!\n\nType .menu for commands! 🌟` });
                 return;
         }
         
@@ -587,14 +609,19 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
                     updateUserSession(userJid, 'admin');
                     await sendMessageWithDelay(sock, jid, { text: renderMenu('admin', userJid) });
                 } else if (choice === 9) {
-                    await sendMessageWithDelay(sock, jid, { text: '❓ HELP:\n\n🔹 .menu → Main menu\n🔹 .back → Go back\n🔹 .admin → Admin panel\n🔹 .ytvideo → Video info\n🔹 .ytaudio → Audio info\n🔹 .announce → Group announcement\n🔹 .tagall → Tag all members\n⏰ Menus reset after 5min' });
+                    await sendMessageWithDelay(sock, jid, { text: '❓ HELP:\n\n🔹 .menu → Main menu\n🔹 .back → Go back\n🔹 .admin → Admin panel\n🔹 .ytvideo → Video info\n🔹 .ytaudio → Audio info\n🔹 .announce → Group announcement\n🔹 .tagall → Tag all members\n🔹 .joke → Get a joke\n🔹 .fact → Get a fact\n🔹 .quote → Get a quote\n⏰ Menus reset after 5min' });
                 }
                 break;
                 
             case 'creative':
                 if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '🎨 ASCII ART GENERATOR\n\nType any word to convert to ASCII art!\nExample: Type "HELLO" for ASCII art' });
                 else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '🖼️ IMAGE → ASCII\n\n🚧 Coming soon! Send images to convert to ASCII art.' });
-                else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🤖 FAKE CHATGPT ACTIVATED\n\nI\'m now in AI mode! Ask me anything and I\'ll respond like ChatGPT!' });
+                else if (choice === 3) {
+                    const session = getUserSession(userJid);
+                    session.aiMode = true;
+                    saveData('userSessions');
+                    await sendMessageWithDelay(sock, jid, { text: '🤖 AI CHAT ACTIVATED\n\nI\'m now in AI mode! Ask me anything and I\'ll respond intelligently!\nType .back to exit AI mode.' });
+                }
                 break;
                 
             case 'games':
@@ -622,7 +649,7 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
                 if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '📅 REMINDERS\n\nUse .remind [time] [message]\nExample: .remind 1h Meeting' });
                 else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '📝 NOTES\n\nUse .note [content]\nExample: .note Buy groceries' });
                 else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🔢 CALCULATOR\n\nUse .calc [expression]\nExample: .calc 2+2' });
-                else if (choice === 4) await sendMessageWithDelay(sock, jid, { text: '🌐 TRANSLATOR\n\nUse .translate [text]\nExample: .translate Hello' });
+                else if (choice === 4) await sendMessageWithDelay(sock, jid, { text: '🌐 TRANSLATOR\n\nUse .translate [lang] [text] (lang optional, default en)\nExample: .translate es Hello' });
                 break;
                 
             case 'group':
@@ -634,7 +661,7 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
                 break;
                 
             case 'youtube':
-                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '🔍 YOUTUBE SEARCH\n\nUse .ytvideo [url] for video info\nSearch is limited, use specific URLs' });
+                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '🔍 YOUTUBE SEARCH\n\nUse .ytsearch [query]' });
                 else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '🎥 VIDEO INFO\n\nUse .ytvideo [video_url]' });
                 else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🎵 AUDIO INFO\n\nUse .ytaudio [video_url]' });
                 break;
@@ -714,11 +741,17 @@ async function startBot() {
                 
                 if (isStockCountMessage(text)) await handleStockCountReaction(sock, msg);
                 
+                const session = getUserSession(userJid);
+                
                 if (text && text.startsWith('.')) {
                     const parts = text.slice(1).split(' ');
                     const command = parts[0].toLowerCase();
                     const args = parts.slice(1);
                     await processCommand(sock, msg, command, args);
+                } else if (session.aiMode) {
+                    // Handle AI response
+                    const aiResponse = await getAIResponse(text);
+                    await sendMessageWithDelay(sock, msg.key.remoteJid, { text: `🤖 *AI Response:*\n\n${aiResponse}` });
                 } else {
                     // Handle trivia answers
                     const triviaResult = playTrivia(text, msg.key.remoteJid, userJid);
