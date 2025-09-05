@@ -1,7 +1,7 @@
 {
-  "name": "whatsapp-bot-basic",
+  "name": "kaizen-whatsapp-bot",
   "version": "1.0.0",
-  "description": "Basic WhatsApp bot using Baileys",
+  "description": "Kaizen (Broken Vzn AI) WhatsApp Bot with advanced features like YouTube tools, games, and AI chat",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,14 +9,18 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.8",
+    "node-fetch": "^2.7.0",
+    "pino": "^8.19.0",
     "qrcode-terminal": "^0.12.0",
-    "pino": "^8.19.0"
+    "ytdl-core": "^4.11.5",
+    "yt-dlp": "^0.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "author": "Kaizen",
+  "license": "MIT"
 }
- 
