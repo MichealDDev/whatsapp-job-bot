@@ -7,13 +7,20 @@ WORKDIR /app
 # Copy package.json first (for better Docker caching)
 COPY package.json ./
 
-# Install dependencies
-RUN npm ci --only=production --no-audit --no-fund
+# Copy package-lock.json if it exists
+COPY package-loc[k].json ./
+
+# Install dependencies (fallback to npm install if no lock file)
+RUN if [ -f package-lock.json ]; then \
+        npm ci --omit=dev --no-audit --no-fund; \
+    else \
+        npm install --omit=dev --no-audit --no-fund; \
+    fi
 
 # Copy all source code
 COPY . .
 
-# Create directories that bot needs
+# Create directories that your bot needs
 RUN mkdir -p /tmp/data /tmp/auth_info
 
 # Expose port for Railway health checks
