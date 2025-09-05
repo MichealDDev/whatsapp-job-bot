@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "description": "Kaizen (Broken Vzn AI) WhatsApp Bot with advanced features like YouTube tools, games, and AI chat",
   "main": "index.js",
+  {
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "build": "echo 'No build step needed'"
+  }
+}
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.8",
