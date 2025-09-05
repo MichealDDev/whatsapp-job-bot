@@ -528,27 +528,27 @@ function playRPS(choice, chatId, playerId) {
 function startNumberGuess(chatId) {
     const number = Math.floor(Math.random() * 100) + 1;
     activeGames[chatId] = { type: 'guess', number, attempts: 7, players: {} };
-    return '🔢 *NUMBER GUESSING GAME!* 🎲\n\nI\'m thinking of a number 1-100\nYou have 7 attempts!\n\nGuess a number!';
+    return '🔢 NUMBER GUESSING GAME!\n\nI am thinking of a number 1-100\nYou have 7 attempts!\n\nGuess a number!';
 }
 
 function playNumberGuess(guess, chatId, playerId) {
     const game = activeGames[chatId];
-    if (!game || game.type !== 'guess') return '❌ No active number game. Start one with Games Arena!';
+    if (!game || game.type !== 'guess') return '❌ No active number game';
     
     const num = parseInt(guess);
-    if (isNaN(num) || num < 1 || num > 100) return '❌ Enter a number between 1-100!';
+    if (isNaN(num) || num < 1 || num > 100) return '❌ Enter a number between 1-100';
     
     game.attempts--;
     
     if (num === game.number) {
         delete activeGames[chatId];
-        return `🎉 CORRECT! The number was ${game.number}!\n🏆 You won with ${7 - game.attempts} attempts!\n\nStart a new game in Games Arena!`;
+        return `🎉 CORRECT! The number was ${game.number}!\n🏆 You won with ${7 - game.attempts} attempts!`;
     } else if (game.attempts <= 0) {
         delete activeGames[chatId];
-        return `💀 *Game Over!* The number was ${game.number}.\n\nTry again in Games Arena!`;
+        return `💀 Game Over! The number was ${game.number}`;
     } else {
-        const hint = num > game.number ? '📉 *Too high!*' : '📈 *Too low!*';
-        return `${hint}\n🎯 Attempts left: ${game.attempts}\n\nGuess again!`;
+        const hint = num > game.number ? '📉 Too high!' : '📈 Too low!';
+        return `${hint}\n🎯 Attempts left: ${game.attempts}`;
     }
 }
 
