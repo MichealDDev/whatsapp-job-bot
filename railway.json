@@ -1,26 +1,11 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "nixpacksPlan": {
-      "providers": ["node"],
-      "phases": {
-        "setup": {
-          "nixPkgs": ["nodejs-18_x", "python3", "ffmpeg"],
-          "aptPkgs": ["python3-pip"],
-          "cmd": "pip install yt-dlp"
-        },
-        "build": {
-          "cmd": "npm ci"
-        }
-      }
-    }
+    "builder": "DOCKERFILE"
   },
   "deploy": {
-    "startCommand": "npm start",
     "sleepApplication": false,
-    "restartPolicyType": "ALWAYS"
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
   }
 }
-
-
