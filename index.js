@@ -542,7 +542,7 @@ function playNumberGuess(guess, chatId, playerId) {
     
     if (num === game.number) {
         delete activeGames[chatId];
-        return `🎉 *CORRECT!* The number was ${game.number}!\n🏆 You won with ${7 - game.attempts} attempts!\n\nStart a new game in Games Arena!`;
+        return `🎉 CORRECT! The number was ${game.number}!\n🏆 You won with ${7 - game.attempts} attempts!\n\nStart a new game in Games Arena!`;
     } else if (game.attempts <= 0) {
         delete activeGames[chatId];
         return `💀 *Game Over!* The number was ${game.number}.\n\nTry again in Games Arena!`;
