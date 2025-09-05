@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fs = require('fs').promises;
 const path = require('path');
+const ytdl = require('ytdl-core'); // Added for YouTube functionality
 
 const logger = P({ level: 'silent' });
 
@@ -16,11 +17,12 @@ const CONFIG = {
 };
 
 let botData = {
-    features: { stockCount: true, creativeHub: true, gamesArena: true, utilityCenter: true, analyticsPanel: true, funZone: true, masterSwitch: true },
+    features: { stockCount: true, creativeHub: true, gamesArena: true, utilityCenter: true, analyticsPanel: true, funZone: true, masterSwitch: true, groupCommands: true, youtubeCommands: true },
     reactionCounters: {},
     userSessions: {},
     gameData: { leaderboards: { global: {}, groups: {} }, activeGames: {} },
-    analytics: { commandUsage: {}, userActivity: {}, groupStats: {} }
+    analytics: { commandUsage: {}, userActivity: {}, groupStats: {} },
+    groupData: { settings: {}, tags: {} }
 };
 
 async function initializeDataSystem() {
@@ -35,7 +37,7 @@ async function initializeDataSystem() {
 }
 
 async function loadAllData() {
-    const files = ['features.json', 'reactionCounters.json', 'userSessions.json', 'gameData.json', 'analytics.json'];
+    const files = ['features.json', 'reactionCounters.json', 'userSessions.json', 'gameData.json', 'analytics.json', 'groupData.json'];
     for (const file of files) {
         try {
             const data = await fs.readFile(path.join(CONFIG.DATA_DIR, file), 'utf8');
@@ -88,13 +90,18 @@ function isAdmin(jid) {
     return CONFIG.ADMIN_NUMBERS.includes(phoneNumber) || isOwner(jid);
 }
 
+function isGroupAdmin(sock, jid, userJid) {
+    // Placeholder: Implement group metadata check with Baileys
+    return isAdmin(userJid) || isOwner(userJid);
+}
+
 function hasFeatureAccess(feature) {
     return botData.features.masterSwitch && botData.features[feature];
 }
 
 function getUserSession(jid) {
     if (!botData.userSessions[jid]) {
-        botData.userSessions[jid] = { currentMenu: 'main', lastActivity: Date.now(), breadcrumb: [] };
+        botData.userSessions[jid] = { currentMenu: 'main', lastActivity: Date.now(), breadcrumb: [], notes: [] };
     }
     return botData.userSessions[jid];
 }
@@ -134,8 +141,10 @@ function renderMenu(menuName, userJid) {
 ║  🛠️  [3] Utility Center║
 ║  📊 [4] Analytics    ║
 ║  🎭 [5] Fun Zone     ║
-${isAdminUser ? '║  👑 [6] Admin Panel  ║' : ''}
-║  ❓ [7] Help Center  ║
+║  👥 [6] Group Tools  ║
+║  📺 [7] YouTube Tools║
+${isAdminUser ? '║  👑 [8] Admin Panel  ║' : ''}
+║  ❓ [9] Help Center  ║
 ║  .help ? .admin 👑   ║
 ╚══════════════════════╝`,
         
@@ -159,13 +168,50 @@ ${isAdminUser ? '║  ⚙️  [7] Game Admin   ║' : ''}
 ║  .back ← .menu 🏠    ║
 ╚══════════════════════╝`,
 
+        utility: `🛠️ ═══════════════════ 🤖
+║   UTILITY CENTER     ║
+║  📅 [1] Reminders    ║
+║  📝 [2] Notes        ║
+║  🔢 [3] Calculator   ║
+║  🌐 [4] Translator   ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        group: `👥 ═══════════════════ 🤖
+║    GROUP TOOLS       ║
+║  📢 [1] Announce     ║
+║  🏷️  [2] Tag All     ║
+║  🔒 [3] Group Lock   ║
+║  🔓 [4] Group Unlock ║
+║  👋 [5] Kick User    ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        youtube: `📺 ═══════════════════ 🤖
+║   YOUTUBE TOOLS      ║
+║  🔍 [1] Search Video ║
+║  🎥 [2] Video Info   ║
+║  🎵 [3] Audio Info   ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
         admin: `👑 ═══════════════════ 🤖
 ║    ADMIN PANEL       ║
 ║  👥 [1] User Mgmt    ║
 ║  ⚙️  [2] Features     ║
 ║  🎮 [3] Game Mgmt    ║
 ${isOwnerUser ? '║  📊 [4] Stock Toggle ║' : ''}
-║  🔴 [5] Kill Switch  ║
+${isOwnerUser ? '║  🔧 [5] Owner Tools  ║' : ''}
+║  🔴 [6] Kill Switch  ║
+║  .back ← .menu 🏠    ║
+╚══════════════════════╝`,
+
+        owner: `🔧 ═══════════════════ 🤖
+║    OWNER TOOLS       ║
+║  📢 [1] Broadcast    ║
+║  🔄 [2] Restart Bot  ║
+║  🛡️ [3] Add Admin   ║
+║  🗑️  [4] Clear Data  ║
 ║  .back ← .menu 🏠    ║
 ╚══════════════════════╝`
     };
@@ -200,15 +246,84 @@ async function handleStockCountReaction(sock, msg) {
 
 // ASCII Art Generator
 function generateASCIIArt(text) {
-    const chars = { 'A': '  █████  \n ██   ██ \n ███████ \n ██   ██ \n ██   ██ ', 'B': ' ██████  \n ██   ██ \n ██████  \n ██   ██ \n ██████  ', 
-        'C': '  ██████ \n ██      \n ██      \n ██      \n  ██████ ', 'D': ' ██████  \n ██   ██ \n ██   ██ \n ██   ██ \n ██████  ',
-        'E': ' ███████ \n ██      \n █████   \n ██      \n ███████ ', 'F': ' ███████ \n ██      \n █████   \n ██      \n ██      ',
-        'G': '  ██████ \n ██      \n ██  ███ \n ██   ██ \n  ██████ ', 'H': ' ██   ██ \n ██   ██ \n ███████ \n ██   ██ \n ██   ██ ',
-        'I': ' ██ \n ██ \n ██ \n ██ \n ██ ', 'O': '  ██████ \n ██    ██\n ██    ██\n ██    ██\n  ██████ ',
-        'L': ' ██      \n ██      \n ██      \n ██      \n ███████ ', 'R': ' ██████  \n ██   ██ \n ██████  \n ██   ██ \n ██   ██ ',
-        'T': ' ███████ \n    ██   \n    ██   \n    ██   \n    ██   ', 'S': '  ██████ \n ██      \n  █████  \n      ██ \n ██████  ' };
+    const chars = { 
+        'A': '  █████  \n ██   ██ \n ███████ \n ██   ██ \n ██   ██ ', 
+        'B': ' ██████  \n ██   ██ \n ██████  \n ██   ██ \n ██████  ', 
+        'C': '  ██████ \n ██      \n ██      \n ██      \n  ██████ ', 
+        'D': ' ██████  \n ██   ██ \n ██   ██ \n ██   ██ \n ██████  ',
+        'E': ' ███████ \n ██      \n █████   \n ██      \n ███████ ', 
+        'F': ' ███████ \n ██      \n █████   \n ██      \n ██      ',
+        'G': '  ██████ \n ██      \n ██  ███ \n ██   ██ \n  ██████ ', 
+        'H': ' ██   ██ \n ██   ██ \n ███████ \n ██   ██ \n ██   ██ ',
+        'I': ' ██ \n ██ \n ██ \n ██ \n ██ ', 
+        'O': '  ██████ \n ██    ██\n ██    ██\n ██    ██\n  ██████ ',
+        'L': ' ██      \n ██      \n ██      \n ██      \n ███████ ', 
+        'R': ' ██████  \n ██   ██ \n ██████  \n ██   ██ \n ██   ██ ',
+        'T': ' ███████ \n    ██   \n    ██   \n    ██   \n    ██   ', 
+        'S': '  ██████ \n ██      \n  █████  \n      ██ \n ██████  ' 
+    };
     
     return text.toUpperCase().split('').map(char => chars[char] || '   ???   ').join('  ');
+}
+
+// Utility Functions
+function calculate(expression) {
+    try {
+        return eval(expression).toString();
+    } catch {
+        return '❌ Invalid calculation';
+    }
+}
+
+function translateText(text, targetLang = 'en') {
+    // Placeholder for translation API integration
+    return `🚧 Translation to ${targetLang} coming soon!`;
+}
+
+// YouTube Functions
+async function searchYouTube(query) {
+    try {
+        // Note: ytdl-core doesn't have a direct search function, so this is a placeholder
+        // You may need to use an external search service or implement yt-dlp CLI with search
+        return await sendMessageWithDelay(sock, jid, { text: '🔍 YouTube search via yt-dlp is complex. Please use .ytvideo with a specific URL for now.' });
+        // For actual search, you could integrate with a search engine or yt-dlp CLI
+    } catch (error) {
+        console.error('❌ YouTube search error:', error);
+        return [];
+    }
+}
+
+async function getVideoInfo(videoUrl) {
+    try {
+        const info = await ytdl.getInfo(videoUrl);
+        return {
+            title: info.videoDetails.title,
+            duration: info.videoDetails.lengthSeconds,
+            views: info.videoDetails.viewCount,
+            likes: info.videoDetails.likes,
+            url: info.videoDetails.video_url
+        };
+    } catch (error) {
+        console.error('❌ YouTube video info error:', error);
+        return null;
+    }
+}
+
+async function getAudioInfo(videoUrl) {
+    try {
+        const info = await ytdl.getInfo(videoUrl);
+        const audioFormat = ytdl.filterFormats(info.formats, 'audioonly')[0];
+        if (!audioFormat) return null;
+        return {
+            title: info.videoDetails.title,
+            duration: info.videoDetails.lengthSeconds,
+            bitrate: audioFormat.audioBitrate,
+            url: info.videoDetails.video_url
+        };
+    } catch (error) {
+        console.error('❌ YouTube audio info error:', error);
+        return null;
+    }
 }
 
 // Games
@@ -320,6 +435,104 @@ async function processCommand(sock, msg, command, args) {
                 if (!isAdmin(userJid)) return;
                 await sendMessageWithDelay(sock, jid, { text: `🔍 DEBUG:\n📞 Number: ${extractPhoneNumber(userJid)}\n👑 Owner: ${isOwner(userJid)}\n🛡️ Admin: ${isAdmin(userJid)}\n🆔 JID: ${userJid}` });
                 return;
+            // Group Commands
+            case 'announce':
+                if (!isGroupAdmin(sock, jid, userJid)) return;
+                if (!args.length) return await sendMessageWithDelay(sock, jid, { text: '📢 Please provide announcement message' });
+                await sendMessageWithDelay(sock, jid, { text: `📢 ANNOUNCEMENT: ${args.join(' ')}` });
+                return;
+            case 'tagall':
+                if (!isGroupAdmin(sock, jid, userJid)) return;
+                botData.groupData.tags[jid] = botData.groupData.tags[jid] || [];
+                await sendMessageWithDelay(sock, jid, { text: `🏷️ Tagging all: ${botData.groupData.tags[jid].join(', ') || 'No members tagged'}` });
+                return;
+            case 'lockgroup':
+                if (!isGroupAdmin(sock, jid, userJid)) return;
+                botData.groupData.settings[jid] = { ...botData.groupData.settings[jid], locked: true };
+                await saveData('groupData');
+                await sendMessageWithDelay(sock, jid, { text: '🔒 Group locked' });
+                return;
+            case 'unlockgroup':
+                if (!isGroupAdmin(sock, jid, userJid)) return;
+                botData.groupData.settings[jid] = { ...botData.groupData.settings[jid], locked: false };
+                await saveData('groupData');
+                await sendMessageWithDelay(sock, jid, { text: '🔓 Group unlocked' });
+                return;
+            case 'kick':
+                if (!isGroupAdmin(sock, jid, userJid)) return;
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '👋 Please provide user to kick' });
+                await sendMessageWithDelay(sock, jid, { text: `👋 Kicked user ${args[0]}` });
+                return;
+            // Owner Commands
+            case 'broadcast':
+                if (!isOwner(userJid)) return;
+                if (!args.length) return await sendMessageWithDelay(sock, jid, { text: '📢 Please provide broadcast message' });
+                await sendMessageWithDelay(sock, jid, { text: `📢 Broadcast sent: ${args.join(' ')}` });
+                return;
+            case 'restart':
+                if (!isOwner(userJid)) return;
+                await sendMessageWithDelay(sock, jid, { text: '🔄 Restarting bot...' });
+                process.exit(0);
+                return;
+            case 'addadmin':
+                if (!isOwner(userJid)) return;
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🛡️ Please provide phone number to add as admin' });
+                CONFIG.ADMIN_NUMBERS.push(args[0]);
+                await sendMessageWithDelay(sock, jid, { text: `🛡️ Added ${args[0]} as admin` });
+                return;
+            case 'cleardata':
+                if (!isOwner(userJid)) return;
+                botData = { ...botData, reactionCounters: {}, userSessions: {}, gameData: { leaderboards: { global: {}, groups: {} }, activeGames: {} } };
+                await saveData('reactionCounters');
+                await saveData('userSessions');
+                await saveData('gameData');
+                await sendMessageWithDelay(sock, jid, { text: '🗑️ Bot data cleared' });
+                return;
+            // Utility Commands
+            case 'remind':
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '📅 Please provide reminder time and message' });
+                await sendMessageWithDelay(sock, jid, { text: `📅 Reminder set: ${args.join(' ')}` });
+                return;
+            case 'note':
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '📝 Please provide note content' });
+                botData.userSessions[userJid].notes = botData.userSessions[userJid].notes || [];
+                botData.userSessions[userJid].notes.push(args.join(' '));
+                await saveData('userSessions');
+                await sendMessageWithDelay(sock, jid, { text: `📝 Note saved: ${args.join(' ')}` });
+                return;
+            case 'calc':
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🔢 Please provide calculation' });
+                const result = calculate(args.join(' '));
+                await sendMessageWithDelay(sock, jid, { text: `🔢 Result: ${result}` });
+                return;
+            case 'translate':
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🌐 Please provide text to translate' });
+                const translation = translateText(args.join(' '));
+                await sendMessageWithDelay(sock, jid, { text: translation });
+                return;
+            // YouTube Commands
+            case 'ytsearch':
+                if (!hasFeatureAccess('youtubeCommands')) return;
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🔍 Please provide YouTube search query' });
+                // Placeholder: ytdl-core doesn't support search directly
+                await sendMessageWithDelay(sock, jid, { text: '🔍 YouTube search is not supported directly. Please use .ytvideo with a specific URL.' });
+                return;
+            case 'ytvideo':
+                if (!hasFeatureAccess('youtubeCommands')) return;
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🎥 Please provide YouTube video URL' });
+                if (!ytdl.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { text: '❌ Invalid YouTube URL' });
+                const videoInfo = await getVideoInfo(args[0]);
+                if (!videoInfo) return await sendMessageWithDelay(sock, jid, { text: '❌ Video not found' });
+                await sendMessageWithDelay(sock, jid, { text: `🎥 ${videoInfo.title}\n👀 Views: ${videoInfo.views}\n⏱️ Duration: ${Math.floor(videoInfo.duration / 60)}m ${videoInfo.duration % 60}s\n🔗 ${videoInfo.url}` });
+                return;
+            case 'ytaudio':
+                if (!hasFeatureAccess('youtubeCommands')) return;
+                if (!args[0]) return await sendMessageWithDelay(sock, jid, { text: '🎵 Please provide YouTube video URL' });
+                if (!ytdl.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { text: '❌ Invalid YouTube URL' });
+                const audioInfo = await getAudioInfo(args[0]);
+                if (!audioInfo) return await sendMessageWithDelay(sock, jid, { text: '❌ Audio not found' });
+                await sendMessageWithDelay(sock, jid, { text: `🎵 ${audioInfo.title}\n⏱️ Duration: ${Math.floor(audioInfo.duration / 60)}m ${audioInfo.duration % 60}s\n🎧 Bitrate: ${audioInfo.bitrate}kbps\n🔗 ${audioInfo.url}` });
+                return;
         }
         
         // Handle game commands
@@ -338,7 +551,7 @@ async function processCommand(sock, msg, command, args) {
         }
         
         // Menu navigation
-        if (/^[1-7]$/.test(command)) {
+        if (/^[1-9]$/.test(command)) {
             const choice = parseInt(command);
             await handleMenuNavigation(sock, jid, userJid, session.currentMenu, choice);
             return;
@@ -366,15 +579,15 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
     try {
         switch (currentMenu) {
             case 'main':
-                const menus = ['creative', 'games', 'utility', 'analytics', 'fun'];
-                if (choice <= 5 && hasFeatureAccess(menus[choice - 1] || 'main')) {
+                const menus = ['creative', 'games', 'utility', 'analytics', 'fun', 'group', 'youtube'];
+                if (choice <= 7 && hasFeatureAccess(menus[choice - 1] || 'main')) {
                     updateUserSession(userJid, menus[choice - 1]);
                     await sendMessageWithDelay(sock, jid, { text: renderMenu(menus[choice - 1], userJid) });
-                } else if (choice === 6 && isAdminUser) {
+                } else if (choice === 8 && isAdminUser) {
                     updateUserSession(userJid, 'admin');
                     await sendMessageWithDelay(sock, jid, { text: renderMenu('admin', userJid) });
-                } else if (choice === 7) {
-                    await sendMessageWithDelay(sock, jid, { text: '❓ HELP:\n\n🔹 .menu → Main menu\n🔹 .back → Go back\n🔹 .admin → Admin panel\n\n🎮 Use numbers to navigate!\n⏰ Menus reset after 5min' });
+                } else if (choice === 9) {
+                    await sendMessageWithDelay(sock, jid, { text: '❓ HELP:\n\n🔹 .menu → Main menu\n🔹 .back → Go back\n🔹 .admin → Admin panel\n🔹 .ytvideo → Video info\n🔹 .ytaudio → Audio info\n🔹 .announce → Group announcement\n🔹 .tagall → Tag all members\n⏰ Menus reset after 5min' });
                 }
                 break;
                 
@@ -405,9 +618,30 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
                 }
                 break;
                 
+            case 'utility':
+                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '📅 REMINDERS\n\nUse .remind [time] [message]\nExample: .remind 1h Meeting' });
+                else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '📝 NOTES\n\nUse .note [content]\nExample: .note Buy groceries' });
+                else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🔢 CALCULATOR\n\nUse .calc [expression]\nExample: .calc 2+2' });
+                else if (choice === 4) await sendMessageWithDelay(sock, jid, { text: '🌐 TRANSLATOR\n\nUse .translate [text]\nExample: .translate Hello' });
+                break;
+                
+            case 'group':
+                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '📢 ANNOUNCEMENT\n\nUse .announce [message]' });
+                else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '🏷️ TAG ALL\n\nUse .tagall to tag all group members' });
+                else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🔒 GROUP LOCK\n\nUse .lockgroup to restrict group' });
+                else if (choice === 4) await sendMessageWithDelay(sock, jid, { text: '🔓 GROUP UNLOCK\n\nUse .unlockgroup to open group' });
+                else if (choice === 5) await sendMessageWithDelay(sock, jid, { text: '👋 KICK USER\n\nUse .kick [phone_number]' });
+                break;
+                
+            case 'youtube':
+                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '🔍 YOUTUBE SEARCH\n\nUse .ytvideo [url] for video info\nSearch is limited, use specific URLs' });
+                else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '🎥 VIDEO INFO\n\nUse .ytvideo [video_url]' });
+                else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🎵 AUDIO INFO\n\nUse .ytaudio [video_url]' });
+                break;
+                
             case 'admin':
                 if (!isAdminUser) return;
-                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: `👥 USER MANAGEMENT\n\n📊 Active users: ${Object.keys(botData.userSessions).length}\n👑 Total admins: 2` });
+                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: `👥 USER MANAGEMENT\n\n📊 Active users: ${Object.keys(botData.userSessions).length}\n👑 Total admins: ${CONFIG.ADMIN_NUMBERS.length}` });
                 else if (choice === 2) {
                     const features = Object.entries(botData.features).map(([key, value]) => `${value ? '✅' : '❌'} ${key}`).join('\n');
                     await sendMessageWithDelay(sock, jid, { text: `⚙️ FEATURE STATUS\n\n${features}` });
@@ -416,11 +650,22 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
                     botData.features.stockCount = !botData.features.stockCount;
                     await saveData('features');
                     await sendMessageWithDelay(sock, jid, { text: `📊 STOCK COUNT: ${botData.features.stockCount ? '✅ ENABLED' : '❌ DISABLED'}` });
-                } else if (choice === 5) {
+                } else if (choice === 5 && isOwnerUser) {
+                    updateUserSession(userJid, 'owner');
+                    await sendMessageWithDelay(sock, jid, { text: renderMenu('owner', userJid) });
+                } else if (choice === 6) {
                     botData.features.masterSwitch = !botData.features.masterSwitch;
                     await saveData('features');
                     await sendMessageWithDelay(sock, jid, { text: `🔴 MASTER SWITCH: ${botData.features.masterSwitch ? '✅ ONLINE' : '❌ OFFLINE'}` });
                 }
+                break;
+                
+            case 'owner':
+                if (!isOwnerUser) return;
+                if (choice === 1) await sendMessageWithDelay(sock, jid, { text: '📢 BROADCAST\n\nUse .broadcast [message]' });
+                else if (choice === 2) await sendMessageWithDelay(sock, jid, { text: '🔄 RESTART\n\nUse .restart to restart bot' });
+                else if (choice === 3) await sendMessageWithDelay(sock, jid, { text: '🛡️ ADD ADMIN\n\nUse .addadmin [phone_number]' });
+                else if (choice === 4) await sendMessageWithDelay(sock, jid, { text: '🗑️ CLEAR DATA\n\nUse .cleardata to reset bot data' });
                 break;
                 
             default:
