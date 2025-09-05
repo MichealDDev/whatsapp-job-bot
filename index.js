@@ -514,7 +514,7 @@ function playRPS(choice, chatId, playerId) {
     const playerChoice = choice.toLowerCase();
     
     let result = '';
-    if (playerChoice === botChoice) result = '🤝 *It’s a TIE!*';
+    if (playerChoice === botChoice) result = '🤝 *It\'s a TIE!*';
     else if ((playerChoice === 'rock' && botChoice === 'scissors') || 
              (playerChoice === 'paper' && botChoice === 'rock') || 
              (playerChoice === 'scissors' && botChoice === 'paper')) {
@@ -522,8 +522,8 @@ function playRPS(choice, chatId, playerId) {
         game.scores[playerId] = (game.scores[playerId] || 0) + 1;
     } else result = '💀 *YOU LOSE!*';
     
-    return `🎮 *RPS Battle*\n\nYou: ${playerChoice} | ${BOT_NAME}: ${botChoice}\n${result}\n📊 Score: ${game.scores[playerId] || 0}\n\nPlay again!';
-}
+    return `🎮 *RPS Battle*\n\nYou: ${playerChoice} | Bot: ${botChoice}\n${result}\n📊 Score: ${game.scores[playerId] || 0}\n\nPlay again!`;
+} 
 
 function startNumberGuess(chatId) {
     const number = Math.floor(Math.random() * 100) + 1;
