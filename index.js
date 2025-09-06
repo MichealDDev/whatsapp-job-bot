@@ -31,16 +31,16 @@ const BOT_INFO = {
     description: "Advanced WhatsApp Bot with Games & Utilities"
 
 // YouTube variables
-let ytDownloader;
+let ytDownloader1;
 
 // Initialize YouTube integration
 async function initializeYouTube() {
     try {
-        ytDownloader = await import('ytdl-core');
+        ytDownloader1 = await import('ytdl-core');
         console.log('🎬 YouTube integration loaded');
     } catch (error) {
         console.error('❌ YouTube integration failed:', error);
-        ytDownloader = null;
+        ytDownloader1 = null;
     }
 }
 
@@ -72,7 +72,7 @@ function formatNumber(num) {
 
 // Get video information
 async function getVideoInfo(url) {
-    if (!ytDownloader) {
+    if (!ytDownloader1) {
         return '❌ YouTube integration not available';
     }
     
@@ -81,7 +81,7 @@ async function getVideoInfo(url) {
             return '❌ Invalid YouTube URL';
         }
         
-        const info = await ytDownloader.default.getInfo(url);
+        const info = await ytDownloader1.default.getInfo(url);
         const details = info.videoDetails;
         
         return `🎬 *YOUTUBE VIDEO INFO*\n\n` +
@@ -119,7 +119,7 @@ async function searchYouTube(query) {
 
 // Download audio function
 async function downloadAudio(url, chatId) {
-    if (!ytDownloader) {
+    if (!ytDownloader1) {
         return '❌ YouTube integration not available';
     }
     
@@ -129,7 +129,7 @@ async function downloadAudio(url, chatId) {
         }
         
         // Get video info first
-        const info = await ytDownloader.default.getInfo(url);
+        const info = await ytDownloader1.default.getInfo(url);
         const title = info.videoDetails.title.replace(/[^\w\s-]/gi, ''); // Clean filename
         const duration = parseInt(info.videoDetails.lengthSeconds);
         
@@ -147,7 +147,7 @@ async function downloadAudio(url, chatId) {
         
         return new Promise((resolve, reject) => {
             // Download audio only (lowest quality to save bandwidth)
-            const stream = ytDownloader.default(url, { 
+            const stream = ytDownloader1.default(url, { 
                 quality: 'lowestaudio',
                 filter: 'audioonly'
             });
@@ -204,7 +204,7 @@ async function downloadAudio(url, chatId) {
 
 // Download video function
 async function downloadVideo(url, quality = 'lowest') {
-    if (!ytDownloader) {
+    if (!ytDownloader1) {
         return '❌ YouTube integration not available';
     }
     
@@ -229,7 +229,7 @@ async function downloadVideo(url, quality = 'lowest') {
         const filepath = path.join(downloadDir, filename);
         
         return new Promise((resolve, reject) => {
-            const stream = ytDownloader.default(url, { 
+            const stream = ytDownloader1.default(url, { 
                 quality: quality,
                 filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio
             });
@@ -1250,7 +1250,7 @@ async function processCommand(sock, msg, command, args) {
                 if (!args[0]) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎥 *${BOT_NAME} Video Info* 🎥\n\nPlease provide a YouTube video URL!` 
                 });
-                if (!ytDownloader.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
+                if (!ytDownloader1.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎥 *Invalid URL!* 🎥\n\nPlease provide a valid YouTube URL.\n\n` +
                           `— Powered by ${BOT_NAME} (${BOT_ALIAS})` 
                 });
@@ -1272,7 +1272,7 @@ async function processCommand(sock, msg, command, args) {
                 if (!args[0]) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎵 *${BOT_NAME} Audio Info* 🎵\n\nPlease provide a YouTube video URL!` 
                 });
-                if (!ytDownloader.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
+                if (!ytDownloader1.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎵 *Invalid URL!* 🎵\n\nPlease provide a valid YouTube URL.\n\n` +
                           `— Powered by ${BOT_NAME} (${BOT_ALIAS})` 
                 });
