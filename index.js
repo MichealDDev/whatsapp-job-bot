@@ -29,20 +29,18 @@ const BOT_INFO = {
     version: BOT_VERSION,
     author: "MichealDDev",
     description: "Advanced WhatsApp Bot with Games & Utilities"
-// ========== YOUTUBE FUNCTIONALITY ==========
-// Place this RIGHT AFTER your CONFIG section
 
 // YouTube variables
-let ytdl;
+let ytdlcore;
 
 // Initialize YouTube integration
 async function initializeYouTube() {
     try {
-        ytdl = await import('ytdl-core');
+        ytdlcore = await import('ytdl-core');
         console.log('🎬 YouTube integration loaded');
     } catch (error) {
         console.error('❌ YouTube integration failed:', error);
-        ytdl = null;
+        ytdlcore = null;
     }
 }
 
@@ -74,7 +72,7 @@ function formatNumber(num) {
 
 // Get video information
 async function getVideoInfo(url) {
-    if (!ytdl) {
+    if (!ytdlcore) {
         return '❌ YouTube integration not available';
     }
     
@@ -83,7 +81,7 @@ async function getVideoInfo(url) {
             return '❌ Invalid YouTube URL';
         }
         
-        const info = await ytdl.default.getInfo(url);
+        const info = await ytdlcore.default.getInfo(url);
         const details = info.videoDetails;
         
         return `🎬 *YOUTUBE VIDEO INFO*\n\n` +
@@ -121,7 +119,7 @@ async function searchYouTube(query) {
 
 // Download audio function
 async function downloadAudio(url, chatId) {
-    if (!ytdl) {
+    if (!ytdlcore) {
         return '❌ YouTube integration not available';
     }
     
@@ -131,7 +129,7 @@ async function downloadAudio(url, chatId) {
         }
         
         // Get video info first
-        const info = await ytdl.default.getInfo(url);
+        const info = await ytdlcore.default.getInfo(url);
         const title = info.videoDetails.title.replace(/[^\w\s-]/gi, ''); // Clean filename
         const duration = parseInt(info.videoDetails.lengthSeconds);
         
@@ -149,7 +147,7 @@ async function downloadAudio(url, chatId) {
         
         return new Promise((resolve, reject) => {
             // Download audio only (lowest quality to save bandwidth)
-            const stream = ytdl.default(url, { 
+            const stream = ytdlcore.default(url, { 
                 quality: 'lowestaudio',
                 filter: 'audioonly'
             });
@@ -206,7 +204,7 @@ async function downloadAudio(url, chatId) {
 
 // Download video function
 async function downloadVideo(url, quality = 'lowest') {
-    if (!ytdl) {
+    if (!ytdlcore) {
         return '❌ YouTube integration not available';
     }
     
@@ -231,7 +229,7 @@ async function downloadVideo(url, quality = 'lowest') {
         const filepath = path.join(downloadDir, filename);
         
         return new Promise((resolve, reject) => {
-            const stream = ytdl.default(url, { 
+            const stream = ytdlcore.default(url, { 
                 quality: quality,
                 filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio
             });
@@ -1252,7 +1250,7 @@ async function processCommand(sock, msg, command, args) {
                 if (!args[0]) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎥 *${BOT_NAME} Video Info* 🎥\n\nPlease provide a YouTube video URL!` 
                 });
-                if (!ytdl.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
+                if (!ytdlcore.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎥 *Invalid URL!* 🎥\n\nPlease provide a valid YouTube URL.\n\n` +
                           `— Powered by ${BOT_NAME} (${BOT_ALIAS})` 
                 });
@@ -1274,7 +1272,7 @@ async function processCommand(sock, msg, command, args) {
                 if (!args[0]) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎵 *${BOT_NAME} Audio Info* 🎵\n\nPlease provide a YouTube video URL!` 
                 });
-                if (!ytdl.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
+                if (!ytdlcore.validateURL(args[0])) return await sendMessageWithDelay(sock, jid, { 
                     text: `🎵 *Invalid URL!* 🎵\n\nPlease provide a valid YouTube URL.\n\n` +
                           `— Powered by ${BOT_NAME} (${BOT_ALIAS})` 
                 });
@@ -1759,11 +1757,8 @@ async function startBot() {
     return sock;
 }
 
-
 console.log(`🚀 Starting ${BOT_NAME} (${BOT_ALIAS})...`);
-console.log(`📋 Version: ${BOT_VERSION}`);
 console.log('🎮 All features loaded and ready!');
-
 startBot().catch(err => {
     console.error('❌ Bot startup error:', err);
     process.exit(1);
@@ -1771,14 +1766,13 @@ startBot().catch(err => {
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log(`\n💾 Saving data before ${BOT_NAME} shutdown...`);
+    console.log('\n💾 Saving data before shutdown...');
     await backupData();
-    console.log(`👋 ${BOT_NAME} shutting down gracefully...`);
+    console.log('👋 Bot shutting down gracefully...');
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-    console.log(`⚡ ${BOT_NAME} received SIGTERM`);
     await backupData();
     process.exit(0);
 });
