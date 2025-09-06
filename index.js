@@ -1704,23 +1704,41 @@ async function startBot() {
                 
                 const session = getUserSession(userJid);
                 
-                if (text && text.startsWith('.')) {
-                    const parts = text.slice(1).split(' ');
-                    const command = parts[0].toLowerCase();
-                    const args = parts.slice(1);
-                    await processCommand(sock, msg, command, args);
-                } else if (session.aiMode) {
-                    const aiResponse = await getAIResponse(text);
-                    await sendMessageWithDelay(sock, msg.key.remoteJid, { 
-                        text: `🤖 *${BOT_NAME}'s AI Response* 🤖\n\n${aiResponse}\n\n` +
-                              `💡 Keep chatting or type .back to exit AI mode!` 
-                    });
-                } else {
-                    const triviaResult = playTrivia(text, msg.key.remoteJid, userJid);
-                    if (triviaResult !== '❌ No active trivia. Start one in Games Arena!') {
-                        await sendMessageWithDelay(sock, msg.key.remoteJid, { text: triviaResult });
-                    }
-                }
+               // FIRST: Check for traditional commands (starting with '.')
+if (text && text.startsWith('.')) {
+    const parts = text.slice(1).split(' ');
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1);
+    await processCommand(sock, msg, command, args);
+}
+// SECOND: If NOT a traditional command, check for menu navigation (single digit 1-9)
+else if (/^[1-9]$/.test(text.trim())) {
+    const choice = text.trim();
+    await handleMenuNavigation(sock, msg.key.remoteJid, userJid, session.currentMenu, choice);
+}
+// THIRD: If not a command or menu nav, check if user is in AI mode
+else if (session.aiMode) {
+    const aiResponse = await getAIResponse(text);
+    await sendMessageWithDelay(sock, msg.key.remoteJid, { 
+        text: `🤖 *${BOT_NAME}'s AI Response* 🤖
+${aiResponse}
+` +
+              `💡 Keep chatting or type .back to exit AI mode!` 
+    });
+}
+// FOURTH: Finally, check if it's a trivia answer or other game input
+else {
+    const triviaResult = playTrivia(text, msg.key.remoteJid, userJid);
+    if (triviaResult !== '❌ No active trivia. Start one in Games Arena!') {
+        await sendMessageWithDelay(sock, msg.key.remoteJid, { text: triviaResult });
+    }
+    // You can add other game handlers here if needed (e.g., RPS, Number Guess)
+    // For example:
+    // else if (['rock', 'paper', 'scissors'].includes(text.toLowerCase().trim())) {
+    //     const rpsResult = playRPS(text.trim(), msg.key.remoteJid, userJid);
+    //     await sendMessageWithDelay(sock, msg.key.remoteJid, { text: rpsResult });
+    // }
+}
             } else if (messageType === 'buttonsResponseMessage') {
                 const buttonId = msg.message.buttonsResponseMessage.selectedButtonId;
                 await handleButtonInteraction(sock, msg, buttonId);
