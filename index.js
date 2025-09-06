@@ -1759,8 +1759,11 @@ async function startBot() {
     return sock;
 }
 
+
 console.log(`🚀 Starting ${BOT_NAME} (${BOT_ALIAS})...`);
+console.log(`📋 Version: ${BOT_VERSION}`);
 console.log('🎮 All features loaded and ready!');
+
 startBot().catch(err => {
     console.error('❌ Bot startup error:', err);
     process.exit(1);
@@ -1768,13 +1771,14 @@ startBot().catch(err => {
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('\n💾 Saving data before shutdown...');
+    console.log(`\n💾 Saving data before ${BOT_NAME} shutdown...`);
     await backupData();
-    console.log('👋 Bot shutting down gracefully...');
+    console.log(`👋 ${BOT_NAME} shutting down gracefully...`);
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
+    console.log(`⚡ ${BOT_NAME} received SIGTERM`);
     await backupData();
     process.exit(0);
 });
