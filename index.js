@@ -847,54 +847,7 @@ async function translateText(text, targetLang = 'en') {
     }
 }
 
-// YouTube Functions
-async function searchYouTube(query) {
-    try {
-        return new Promise((resolve, reject) => {
-            exec(`yt-dlp "ytsearch5:${query}" --dump-json`, (err, stdout) => {
-                if (err) return reject(err);
-                const results = stdout.split('\n').filter(line => line).map(JSON.parse);
-                resolve(results.map(r => ({ title: r.title, url: r.webpage_url })));
-            });
-        });
-    } catch (error) {
-        console.error(`❌ ${BOT_NAME} YouTube search error:`, error);
-        return [];
-    }
-}
 
-async function getVideoInfo(videoUrl) {
-    try {
-        const info = await ytdl.getInfo(videoUrl);
-        return {
-            title: info.videoDetails.title,
-            duration: info.videoDetails.lengthSeconds,
-            views: info.videoDetails.viewCount,
-            likes: info.videoDetails.likes,
-            url: info.videoDetails.video_url
-        };
-    } catch (error) {
-        console.error(`❌ ${BOT_NAME} YouTube video info error:`, error);
-        return null;
-    }
-}
-
-async function getAudioInfo(videoUrl) {
-    try {
-        const info = await ytdl.getInfo(videoUrl);
-        const audioFormat = ytdl.filterFormats(info.formats, 'audioonly')[0];
-        if (!audioFormat) return null;
-        return {
-            title: info.videoDetails.title,
-            duration: info.videoDetails.lengthSeconds,
-            bitrate: audioFormat.audioBitrate,
-            url: info.videoDetails.video_url
-        };
-    } catch (error) {
-        console.error(`❌ ${BOT_NAME} YouTube audio info error:`, error);
-        return null;
-    }
-}
 
 // API Functions
 async function getRandomJoke() {
