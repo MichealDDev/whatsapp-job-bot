@@ -1,16 +1,16 @@
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, ButtonsMessage } = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
-const P = require('pino');
-const fs = require('fs').promises;
-const path = require('path');
-const ytdl = require('ytdl-core');
-const { exec } = require('child_process');
-const fetch = require('node-fetch');
+import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import P from 'pino';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createWriteStream } from 'fs'
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const logger = P({ level: 'silent' });
-const BOT_NAME = 'Kaizen';
-const BOT_ALIAS = 'Broken Vzn AI';
-const startTime = Date.now();
 
 const CONFIG = {
     MENU_TIMEOUT: 5 * 60 * 1000,
@@ -20,6 +20,453 @@ const CONFIG = {
     OWNER_ALT_ID: '211532071870561',
     ADMIN_NUMBERS: ['2348088866878', '2349057938488']
 };
+// ========== YOUTUBE FUNCTIONALITY ==========
+// Place this RIGHT AFTER your CONFIG section
+
+// YouTube variables
+let ytdl;
+
+// Initialize YouTube integration
+async function initializeYouTube() {
+    try {
+        ytdl = await import('ytdl-core');
+        console.log('🎬 YouTube integration loaded');
+    } catch (error) {
+        console.error('❌ YouTube integration failed:', error);
+        ytdl = null;
+    }
+}
+
+// YouTube Helper Functions
+function isValidYouTubeURL(url) {
+    const regex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/)|youtu\.be\/)[\w-]+/;
+    return regex.test(url);
+}
+
+function formatDuration(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatNumber(num) {
+    if (num >= 1000000) {
+        return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+        return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+}
+
+// Get video information
+async function getVideoInfo(url) {
+    if (!ytdl) {
+        return '❌ YouTube integration not available';
+    }
+    
+    try {
+        if (!isValidYouTubeURL(url)) {
+            return '❌ Invalid YouTube URL';
+        }
+        
+        const info = await ytdl.default.getInfo(url);
+        const details = info.videoDetails;
+        
+        return `🎬 *YOUTUBE VIDEO INFO*\n\n` +
+               `📺 *Title:* ${details.title}\n` +
+               `👤 *Channel:* ${details.author.name}\n` +
+               `⏱️ *Duration:* ${formatDuration(details.lengthSeconds)}\n` +
+               `👀 *Views:* ${formatNumber(details.viewCount)}\n` +
+               `📅 *Published:* ${details.publishDate || 'Unknown'}\n` +
+               `👍 *Likes:* ${details.likes ? formatNumber(details.likes) : 'Hidden'}\n` +
+               `📝 *Description:* ${details.description ? details.description.substring(0, 150) + '...' : 'No description'}\n\n` +
+               `🎵 Use: .ytaudio ${url}\n` +
+               `🎬 Use: .ytvideo ${url}`;
+               
+    } catch (error) {
+        console.error('YouTube info error:', error);
+        return '❌ Failed to get video info. Please check the URL.';
+    }
+}
+
+// Search YouTube (simple version)
+async function searchYouTube(query) {
+    try {
+        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+        return `🔍 *YOUTUBE SEARCH*\n\n` +
+               `Query: "${query}"\n` +
+               `🌐 Search URL: ${searchUrl}\n\n` +
+               `💡 Copy a video URL and use:\n` +
+               `• .ytinfo [URL] - Get video details\n` +
+               `• .ytaudio [URL] - Download audio\n` +
+               `• .ytvideo [URL] - Download video`;
+    } catch (error) {
+        return '❌ Search failed';
+    }
+}
+
+// Download audio function
+async function downloadAudio(url, chatId) {
+    if (!ytdl) {
+        return '❌ YouTube integration not available';
+    }
+    
+    try {
+        if (!isValidYouTubeURL(url)) {
+            return '❌ Invalid YouTube URL';
+        }
+        
+        // Get video info first
+        const info = await ytdl.default.getInfo(url);
+        const title = info.videoDetails.title.replace(/[^\w\s-]/gi, ''); // Clean filename
+        const duration = parseInt(info.videoDetails.lengthSeconds);
+        
+        // Limit audio downloads to 10 minutes (600 seconds)
+        if (duration > 600) {
+            return `❌ Audio too long! (${formatDuration(duration)})\nMaximum 10 minutes allowed.`;
+        }
+        
+        // Create downloads directory
+        const downloadDir = path.join(__dirname, 'downloads');
+        await fs.mkdir(downloadDir, { recursive: true });
+        
+        const filename = `${title.substring(0, 40)}_${Date.now()}.mp3`;
+        const filepath = path.join(downloadDir, filename);
+        
+        return new Promise((resolve, reject) => {
+            // Download audio only (lowest quality to save bandwidth)
+            const stream = ytdl.default(url, { 
+                quality: 'lowestaudio',
+                filter: 'audioonly'
+            });
+            
+            const writeStream = fs.createWriteStream(filepath);
+            
+            stream.pipe(writeStream);
+            
+            stream.on('error', (error) => {
+                console.error('Audio download error:', error);
+                resolve('❌ Audio download failed');
+            });
+            
+            writeStream.on('finish', async () => {
+                try {
+                    // Check file size (WhatsApp limit ~16MB for audio)
+                    const stats = await fs.stat(filepath);
+                    const fileSizeMB = stats.size / (1024 * 1024);
+                    
+                    if (fileSizeMB > 15) {
+                        // Delete file if too large
+                        await fs.unlink(filepath);
+                        resolve(`❌ Audio too large (${fileSizeMB.toFixed(1)}MB)\nMaximum 15MB allowed.`);
+                    } else {
+                        resolve({
+                            success: true,
+                            filepath: filepath,
+                            filename: filename,
+                            size: `${fileSizeMB.toFixed(1)}MB`,
+                            title: info.videoDetails.title,
+                            duration: formatDuration(duration),
+                            type: 'audio'
+                        });
+                    }
+                } catch (error) {
+                    console.error('File processing error:', error);
+                    resolve('❌ File processing failed');
+                }
+            });
+            
+            // Set timeout for long downloads (2 minutes)
+            setTimeout(() => {
+                stream.destroy();
+                writeStream.destroy();
+                resolve('❌ Download timeout (max 2 minutes)');
+            }, 120000);
+        });
+        
+    } catch (error) {
+        console.error('Audio download error:', error);
+        return '❌ Failed to download audio';
+    }
+}
+
+// Download video function
+async function downloadVideo(url, quality = 'lowest') {
+    if (!ytdl) {
+        return '❌ YouTube integration not available';
+    }
+    
+    try {
+        if (!isValidYouTubeURL(url)) {
+            return '❌ Invalid YouTube URL';
+        }
+        
+        const info = await ytdl.default.getInfo(url);
+        const title = info.videoDetails.title.replace(/[^\w\s-]/gi, '');
+        const duration = parseInt(info.videoDetails.lengthSeconds);
+        
+        // Strict limits for video downloads (5 minutes max)
+        if (duration > 300) {
+            return `❌ Video too long! (${formatDuration(duration)})\nMaximum 5 minutes allowed.`;
+        }
+        
+        const downloadDir = path.join(__dirname, 'downloads');
+        await fs.mkdir(downloadDir, { recursive: true });
+        
+        const filename = `${title.substring(0, 30)}_${Date.now()}.mp4`;
+        const filepath = path.join(downloadDir, filename);
+        
+        return new Promise((resolve, reject) => {
+            const stream = ytdl.default(url, { 
+                quality: quality,
+                filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio
+            });
+            
+            const writeStream = fs.createWriteStream(filepath);
+            stream.pipe(writeStream);
+            
+            stream.on('error', (error) => {
+                console.error('Video download error:', error);
+                resolve('❌ Video download failed');
+            });
+            
+            writeStream.on('finish', async () => {
+                try {
+                    const stats = await fs.stat(filepath);
+                    const fileSizeMB = stats.size / (1024 * 1024);
+                    
+                    // WhatsApp video limit
+                    if (fileSizeMB > 10) {
+                        await fs.unlink(filepath);
+                        resolve(`❌ Video too large (${fileSizeMB.toFixed(1)}MB)\nMaximum 10MB allowed.`);
+                    } else {
+                        resolve({
+                            success: true,
+                            filepath: filepath,
+                            filename: filename,
+                            size: `${fileSizeMB.toFixed(1)}MB`,
+                            title: info.videoDetails.title,
+                            duration: formatDuration(duration),
+                            type: 'video'
+                        });
+                    }
+                } catch (error) {
+                    console.error('File processing error:', error);
+                    resolve('❌ File processing failed');
+                }
+            });
+            
+            // Timeout for video downloads (3 minutes)
+            setTimeout(() => {
+                stream.destroy();
+                writeStream.destroy();
+                resolve('❌ Download timeout (max 3 minutes)');
+            }, 180000);
+        });
+        
+    } catch (error) {
+        console.error('Video download error:', error);
+        return '❌ Failed to download video';
+    }
+}
+
+// Send downloaded file via WhatsApp
+async function sendDownloadedFile(sock, jid, downloadResult) {
+    if (!downloadResult.success) {
+        return downloadResult; // Return error message
+    }
+    
+    try {
+        if (downloadResult.type === 'audio') {
+            // Send as audio message
+            const audioBuffer = await fs.readFile(downloadResult.filepath);
+            await sock.sendMessage(jid, {
+                audio: audioBuffer,
+                mimetype: 'audio/mp4',
+                fileName: downloadResult.filename,
+                caption: `🎵 *${downloadResult.title}*\n⏱️ Duration: ${downloadResult.duration}\n📁 Size: ${downloadResult.size}`
+            });
+        } else if (downloadResult.type === 'video') {
+            // Send as video message
+            const videoBuffer = await fs.readFile(downloadResult.filepath);
+            await sock.sendMessage(jid, {
+                video: videoBuffer,
+                caption: `🎬 *${downloadResult.title}*\n⏱️ Duration: ${downloadResult.duration}\n📁 Size: ${downloadResult.size}`,
+                fileName: downloadResult.filename
+            });
+        }
+        
+        // Clean up file after sending
+        setTimeout(async () => {
+            try {
+                await fs.unlink(downloadResult.filepath);
+                console.log(`🗑️ Cleaned up: ${downloadResult.filename}`);
+            } catch (error) {
+                console.error('Cleanup error:', error);
+            }
+        }, 5000); // Delete after 5 seconds
+        
+        return `✅ *Download Complete!*\n📁 ${downloadResult.size} • ${downloadResult.duration}`;
+        
+    } catch (error) {
+        console.error('Send file error:', error);
+        // Try to clean up file even if sending failed
+        try {
+            await fs.unlink(downloadResult.filepath);
+        } catch {}
+        
+        return '❌ Failed to send file';
+    }
+}
+
+// Process YouTube commands
+async function processYouTubeCommand(sock, msg, command, args) {
+    const jid = msg.key.remoteJid;
+    const userJid = msg.key.participant || jid;
+    
+    // Check if user can download (admin only to prevent abuse)
+    const canDownload = isAdmin(userJid);
+    
+    switch (command) {
+        case 'ytinfo':
+        case 'ytdetails':
+            if (!args[0]) {
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '❓ *Usage:* .ytinfo [YouTube URL]\n\n*Example:* .ytinfo https://youtu.be/dQw4w9WgXcQ' 
+                });
+                return true;
+            }
+            const videoInfo = await getVideoInfo(args[0]);
+            await sendMessageWithDelay(sock, jid, { text: videoInfo });
+            break;
+            
+        case 'ytsearch':
+            if (!args[0]) {
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '❓ *Usage:* .ytsearch [search term]\n\n*Example:* .ytsearch funny cats' 
+                });
+                return true;
+            }
+            const searchResult = await searchYouTube(args.join(' '));
+            await sendMessageWithDelay(sock, jid, { text: searchResult });
+            break;
+            
+        case 'ytaudio':
+        case 'ytmp3':
+            if (!canDownload) {
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '❌ *Download restricted to admins only!*\n\nUse .ytinfo [URL] for video details.' 
+                });
+                return true;
+            }
+            
+            if (!args[0]) {
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '❓ *Usage:* .ytaudio [YouTube URL]\n\n⚠️ *Limits:*\n• Maximum 10 minutes\n• Maximum 15MB\n• Audio only (MP3)' 
+                });
+                return true;
+            }
+            
+            await sendMessageWithDelay(sock, jid, { 
+                text: '⏳ *Downloading audio...*\n\nPlease wait 1-2 minutes...\n\n💡 Larger files take longer!' 
+            });
+            
+            const audioResult = await downloadAudio(args[0], jid);
+            if (typeof audioResult === 'string') {
+                await sendMessageWithDelay(sock, jid, { text: audioResult });
+            } else {
+                const sendResult = await sendDownloadedFile(sock, jid, audioResult);
+                await sendMessageWithDelay(sock, jid, { text: sendResult });
+            }
+            break;
+            
+        case 'ytvideo':
+        case 'ytmp4':
+            if (!canDownload) {
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '❌ *Download restricted to admins only!*\n\nUse .ytinfo [URL] for video details.' 
+                });
+                return true;
+            }
+            
+            if (!args[0]) {
+                await sendMessageWithDelay(sock, jid, { 
+                    text: '❓ *Usage:* .ytvideo [YouTube URL]\n\n⚠️ *Limits:*\n• Maximum 5 minutes\n• Maximum 10MB\n• Lowest quality (MP4)' 
+                });
+                return true;
+            }
+            
+            await sendMessageWithDelay(sock, jid, { 
+                text: '⏳ *Downloading video...*\n\nPlease wait 2-3 minutes...\n\n💡 This may take longer for larger files!' 
+            });
+            
+            const videoResult = await downloadVideo(args[0], 'lowest');
+            if (typeof videoResult === 'string') {
+                await sendMessageWithDelay(sock, jid, { text: videoResult });
+            } else {
+                const sendResult = await sendDownloadedFile(sock, jid, videoResult);
+                await sendMessageWithDelay(sock, jid, { text: sendResult });
+            }
+            break;
+            
+        case 'ythelp':
+            const helpText = `🎬 *YOUTUBE COMMANDS*\n\n` +
+                           `📺 *.ytinfo [URL]* - Get video info\n` +
+                           `🔍 *.ytsearch [query]* - Search YouTube\n\n` +
+                           `*📥 DOWNLOAD (Admin Only):*\n` +
+                           `🎵 *.ytaudio [URL]* - Download audio\n` +
+                           `🎬 *.ytvideo [URL]* - Download video\n\n` +
+                           `*⚠️ Download Limits:*\n` +
+                           `• Audio: Max 10min, 15MB\n` +
+                           `• Video: Max 5min, 10MB\n` +
+                           `• Admin access only`;
+            await sendMessageWithDelay(sock, jid, { text: helpText });
+            break;
+            
+        default:
+            return false; // Command not handled
+    }
+    
+    return true; // Command was handled
+}
+
+// Cleanup old downloads to prevent disk space issues
+async function cleanupDownloads() {
+    try {
+        const downloadDir = path.join(__dirname, 'downloads');
+        
+        // Create directory if it doesn't exist
+        await fs.mkdir(downloadDir, { recursive: true });
+        
+        const files = await fs.readdir(downloadDir);
+        let cleanedCount = 0;
+        
+        for (const file of files) {
+            const filepath = path.join(downloadDir, file);
+            const stats = await fs.stat(filepath);
+            const age = Date.now() - stats.mtime.getTime();
+            
+            // Delete files older than 1 hour
+            if (age > 3600000) {
+                await fs.unlink(filepath);
+                cleanedCount++;
+            }
+        }
+        
+        if (cleanedCount > 0) {
+            console.log(`🗑️ Cleaned up ${cleanedCount} old download files`);
+        }
+    } catch (error) {
+        console.error('Download cleanup error:', error);
+    }
+}
+
+// ========== END OF YOUTUBE FUNCTIONALITY ==========
 
 let botData = {
     features: { stockCount: true, creativeHub: true, gamesArena: true, utilityCenter: true, analyticsPanel: true, funZone: true, masterSwitch: true, groupCommands: true, youtubeCommands: true },
@@ -608,6 +1055,8 @@ async function processCommand(sock, msg, command, args) {
     const userJid = msg.key.participant || jid;
     
     try {
+		 const ytHandled = await processYouTubeCommand(sock, msg, command, args);
+        if (ytHandled) return;
         if (checkSessionTimeout(userJid)) {
             await sendMessageWithDelay(sock, jid, { text: `⏰ *Session Timeout!* Back to main menu. 🏠` });
             updateUserSession(userJid, 'main');
@@ -1253,6 +1702,7 @@ async function handleMenuNavigation(sock, jid, userJid, currentMenu, choice) {
 }
 
 async function startBot() {
+	await initializeYouTube();
     await initializeDataSystem();
     const { state, saveCreds } = await useMultiFileAuthState('./auth_info');
     
