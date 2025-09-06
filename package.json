@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Advanced WhatsApp job bot with games and utilities",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
