@@ -29,9 +29,11 @@ const BOT_INFO = {
     version: BOT_VERSION,
     author: "MichealDDev",
     description: "Advanced WhatsApp Bot with Games & Utilities"
+}
 
 // YouTube variables
-let ytDownloader1 = null;
+let ytDownloader1;
+
 // Initialize YouTube integration
 async function initializeYouTube() {
     try {
