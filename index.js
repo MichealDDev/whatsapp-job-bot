@@ -31,8 +31,7 @@ const BOT_INFO = {
     description: "Advanced WhatsApp Bot with Games & Utilities"
 
 // YouTube variables
-let ytDownloader1;
-
+let ytDownloader1 = null;
 // Initialize YouTube integration
 async function initializeYouTube() {
     try {
