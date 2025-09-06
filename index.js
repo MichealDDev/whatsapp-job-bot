@@ -4,12 +4,10 @@ import P from 'pino';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createWriteStream } from 'fs'
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const logger = P({ level: 'silent' });
 
 const CONFIG = {
@@ -20,6 +18,17 @@ const CONFIG = {
     OWNER_ALT_ID: '211532071870561',
     ADMIN_NUMBERS: ['2348088866878', '2349057938488']
 };
+const BOT_NAME = "WhatsApp Bot";
+const BOT_ALIAS = "Advanced Bot";
+const BOT_VERSION = "2.0.0";
+
+// Bot branding
+const BOT_INFO = {
+    name: BOT_NAME,
+    alias: BOT_ALIAS,
+    version: BOT_VERSION,
+    author: "MichealDDev",
+    description: "Advanced WhatsApp Bot with Games & Utilities"
 // ========== YOUTUBE FUNCTIONALITY ==========
 // Place this RIGHT AFTER your CONFIG section
 
